@@ -71,3 +71,20 @@ const SourceFile *sourceMapGet(const SourceMap *m, FileId id)
 {
   return id >= m->count ? NULL : m->files[id];
 }
+
+LineCol sourceLineCol(const SourceFile *f, uint32_t offset)
+{
+  if (offset > f->len) offset = f->len;
+
+  uint32_t lo = 0, hi = f->lineCount;
+  while (lo < hi) {
+    uint32_t mid = (hi - lo) / 2 + lo;
+    if (f->lineStarts[mid] <= offset) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  uint32_t line = lo - 1, col = offset - f->lineStarts[line];
+  return (LineCol){ line, col };
+}

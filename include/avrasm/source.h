@@ -21,6 +21,12 @@ typedef struct Span
   uint32_t end;
 } Span;
 
+typedef struct LineCol
+{
+  uint32_t line;
+  uint32_t col;
+} LineCol;
+
 typedef struct SourceFile
 {
   const char *path;
@@ -48,5 +54,9 @@ FileId sourceMapAdd(SourceMap *m, const char *path, const char *text, size_t len
 // NULL if id is not a file in this map (including FILE_NONE). the returned
 // pointer stays valid until the arena is freed, even if more files are added.
 const SourceFile *sourceMapGet(const SourceMap *m, FileId id);
+
+// line and col of a byte offset. an offset of f->len is valid
+// and lands on the last line. bigger is clamped
+LineCol sourceLineCol(const SourceFile *f, uint32_t offset);
 
 #endif

@@ -94,6 +94,65 @@ int main(void)
   REQUIRE(again != NULL);
   CHECK_INT(again->len, 8);
 
+  LineCol lc = sourceLineCol(fa, 0);
+  CHECK_INT(lc.line, 0);
+  CHECK_INT(lc.col, 0);
+  lc = sourceLineCol(fa, 4);
+  CHECK_INT(lc.line, 0);
+  CHECK_INT(lc.col, 4);
+  lc = sourceLineCol(fa, 10);
+  CHECK_INT(lc.line, 0);
+  CHECK_INT(lc.col, 10);
+  lc = sourceLineCol(fa, 11);
+  CHECK_INT(lc.line, 1);
+  CHECK_INT(lc.col, 0);
+  lc = sourceLineCol(fa, 13);
+  CHECK_INT(lc.line, 1);
+  CHECK_INT(lc.col, 2);
+  lc = sourceLineCol(fa, 15);
+  CHECK_INT(lc.line, 2);
+  CHECK_INT(lc.col, 0);
+  lc = sourceLineCol(fa, 9999);
+  CHECK_INT(lc.line, 2);
+  CHECK_INT(lc.col, 0);
+
+  const SourceFile *mixed = addText(&map, "a\r\nb\rc\nd");
+  REQUIRE(mixed != NULL);
+  lc = sourceLineCol(mixed, 1);
+  CHECK_INT(lc.line, 0);
+  CHECK_INT(lc.col, 1);
+  lc = sourceLineCol(mixed, 3);
+  CHECK_INT(lc.line, 1);
+  CHECK_INT(lc.col, 0);
+  lc = sourceLineCol(mixed, 5);
+  CHECK_INT(lc.line, 2);
+  CHECK_INT(lc.col, 0);
+  lc = sourceLineCol(mixed, 8);
+  CHECK_INT(lc.line, 3);
+  CHECK_INT(lc.col, 1);
+
+  const SourceFile *empty = addText(&map, "");
+  REQUIRE(empty != NULL);
+  lc = sourceLineCol(empty, 0);
+  CHECK_INT(lc.line, 0);
+  CHECK_INT(lc.col, 0);
+
+  char big[2001];
+  for (int i = 0; i < 1000; i++) {
+    big[2 * i] = 'x';
+    big[2 * i + 1] = '\n';
+  }
+  big[2000] = '\0';
+  const SourceFile *lines = addText(&map, big);
+  REQUIRE(lines != NULL);
+  CHECK_INT(lines->lineCount, 1001);
+  int searchOk = 1;
+  for (uint32_t off = 0; off <= 2000; off++) {
+    lc = sourceLineCol(lines, off);
+    if (lc.line != off / 2 || lc.col != off % 2) searchOk = 0;
+  }
+  CHECK(searchOk);
+
   arenaFree(&arena);
   return TEST_RESULT();
 }
