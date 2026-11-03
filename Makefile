@@ -15,7 +15,7 @@ SAN    ?= 0
 CFLAGS  ?= -O2 -g
 CFLAGS  += -std=c11 -Wall -Wextra -Wpedantic -Iinclude -MMD -MP
 ifeq ($(SAN),1)
-CFLAGS  += -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+CFLAGS  += -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
