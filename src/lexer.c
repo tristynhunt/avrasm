@@ -61,7 +61,6 @@ static Token make(const Lexer *lx, TokenKind kind, uint32_t start)
 }
 
 // reports an error over [start, lx->pos) and returns the TOK_ERROR token for it.
-// so set lx->pos BEFORE calling it
 static Token fail(Lexer *lx, uint32_t start, const char *fmt, ...) AVRASM_PRINTF(3, 4);
 static Token fail(Lexer *lx, uint32_t start, const char *fmt, ...)
 {
@@ -143,11 +142,7 @@ static Token lexNumber(Lexer *lx)
       lx->pos = p;
       return fail(lx, start, "invalid digit '%c' in %s literal", text[i], radixName);
     }
-    if (val > (UINT64_MAX - (uint64_t)d) / (uint64_t)radix) {
-      lx->pos = p;
-      return fail(lx, start, "number is too large");
-    }
-
+    // avrasm2.exe keeps the lower 64-bits and does not err
     val = val * (uint64_t)radix + (uint64_t)d;
     digits++;
   }
@@ -167,7 +162,7 @@ static int lexEscape(Lexer *lx, uint64_t *out)
   uint32_t start = lx->pos, p = start + 1;
   if (p >= len || isLineEnd(text[p])) {
     lx->pos = p;
-    fail(lx, start, "undetermined escape sequence");
+    fail(lx, start, "unterminated escape sequence");
     return 0;
   }
 
