@@ -87,6 +87,9 @@ int main(void)
   r = lex("0X1F 0B101");
   CHECK_STR(r.tokens, "NUMBER(31) NUMBER(5) EOF");
   CHECK_INT(r.errors, 0);
+  r = lex("0x1FFFFFFFFFFFFFFFF 18446744073709551616");
+  CHECK_STR(r.tokens, "NUMBER(18446744073709551615) NUMBER(0) EOF");
+  CHECK_INT(r.errors, 0);
 
   r = lex("0b2");
   CHECK_STR(r.tokens, "ERROR EOF");
@@ -111,9 +114,6 @@ int main(void)
   CHECK_STR(r.spans, "0-5 5-5");
   CHECK_INT(r.errors, 1);
   r = lex("0_b11001010");
-  CHECK_STR(r.tokens, "ERROR EOF");
-  CHECK_INT(r.errors, 1);
-  r = lex("0xFFFFFFFFFFFFFFFFF");
   CHECK_STR(r.tokens, "ERROR EOF");
   CHECK_INT(r.errors, 1);
   r = lex("0b2 nop");
