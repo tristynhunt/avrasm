@@ -27,7 +27,7 @@ CLI      := $(BUILD)/avrasm
 TEST_SRC := $(wildcard tests/unit/test_*.c)
 TEST_BIN := $(patsubst tests/unit/%.c,$(BUILD)/tests/%,$(TEST_SRC))
 
-.PHONY: all test clean
+.PHONY: all test clean difftest
 
 all: $(LIB) $(if $(wildcard src/main.c),$(CLI))
 
@@ -57,6 +57,10 @@ test: $(TEST_BIN)
 # make test-arena  ->  build and run build/tests/test_arena
 test-%: $(BUILD)/tests/test_%
 	$<
+
+# Compare the assembler with the images captured from avrasm2 (see tests/tools/capture.sh).
+difftest: all
+	AVRASM=$(CLI) bash tests/tools/difftest.sh
 
 clean:
 	rm -rf $(BUILD)
