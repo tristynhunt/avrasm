@@ -35,6 +35,8 @@ typedef struct Out {
   uint32_t lookups;
 } Out;
 
+static int wide;
+
 static void runWith(Out *o, const char *src, size_t len, int allowUndefined, int64_t pc)
 {
   Arena arena;
@@ -53,7 +55,7 @@ static void runWith(Out *o, const char *src, size_t len, int allowUndefined, int
   Table table = { 0 };
   ExprEnv env = { &map, &diags, lookup, &table, allowUndefined, pc };
   ExprValue v = { 123, 1 };
-  int ok = exprEval(&cur, &env, &v);
+  int ok = wide ? exprEvalWide(&cur, &env, &v) : exprEval(&cur, &env, &v);
 
   if (!ok) {
     snprintf(o->text, sizeof o->text, "error");
@@ -127,8 +129,8 @@ int main(void)
   CHECK_STR(ev("0x80000000"), "-2147483648");
   CHECK_STR(ev("4294967295"), "-1");
   CHECK_STR(ev("0xFFFFFFFFFFFFFFFF"), "-1");
-  CHECK_STR(ev("0x8000000000000000"), "0");
-  CHECK_STR(ev("9223372036854775807"), "-1");
+  CHECK_STR(ev("0x8000000000000000"), "error");
+  CHECK_STR(ev("9223372036854775807"), "error");
 
   CHECK_STR(ev("1 + 2 * 3"), "7");
   CHECK_STR(ev("(1 + 2) * 3"), "9");
@@ -169,7 +171,7 @@ int main(void)
   CHECK_STR(ev("-7 % 3"), "-1");
   CHECK_STR(ev("7 % -3"), "1");
   CHECK_STR(ev("1 << 40 >> 30"), "1024");
-  CHECK_STR(ev("1 << 40"), "0");
+  CHECK_STR(ev("1 << 40"), "error");
   CHECK_STR(ev("1 << 31"), "-2147483648");
   CHECK_STR(ev("4294967296 >> 1"), "-2147483648");
   CHECK_STR(ev("(2147483647 + 1) / 2"), "1073741824");
@@ -194,11 +196,11 @@ int main(void)
   CHECK_STR(ev("-1 < 0"), "1");
   CHECK_STR(ev("1 == 1"), "1");
   CHECK_STR(ev("1 != 1"), "0");
-  CHECK_STR(ev("MAXI + 1"), "0");
-  CHECK_STR(ev("MINI - 1"), "-1");
+  CHECK_STR(ev("MAXI + 1"), "error");
+  CHECK_STR(ev("MINI - 1"), "error");
   CHECK_STR(ev("MAXI * 2"), "-2");
-  CHECK_STR(ev("-MINI"), "0");
-  CHECK_STR(ev("MINI / -1"), "0");
+  CHECK_STR(ev("-MINI"), "error");
+  CHECK_STR(ev("MINI / -1"), "error");
   CHECK_STR(ev("MINI % -1"), "0");
   CHECK_STR(ev("(MAXI + 1) >> 63"), "-1");
 
@@ -213,6 +215,7 @@ int main(void)
   CHECK_STR(ev("1 ? 0 ? 7 : 8 : 9"), "8");
 
   CHECK_STR(ev("low(0x1234)"), "52");
+  CHECK_STR(ev("byte1(0x1234)"), "52");
   CHECK_STR(ev("high(0x1234)"), "18");
   CHECK_STR(ev("byte2(0x1234)"), "18");
   CHECK_STR(ev("byte3(0x12345678)"), "52");
@@ -229,10 +232,10 @@ int main(void)
   CHECK_STR(ev("abs(-5)"), "5");
   CHECK_STR(ev("abs(5)"), "5");
   CHECK_STR(ev("exp2(31)"), "-2147483648");
-  CHECK_STR(ev("exp2(32)"), "1");
-  CHECK_STR(ev("exp2(62)"), "1073741824");
-  CHECK_STR(ev("log2(0)"), "-1");
-  CHECK_STR(ev("log2(-1)"), "31");
+  CHECK_STR(ev("exp2(32)"), "error");
+  CHECK_STR(ev("exp2(62)"), "error");
+  CHECK_STR(ev("log2(0)"), "error");
+  CHECK_STR(ev("log2(-1)"), "error");
   CHECK_STR(ev("abs(-2147483647 - 1)"), "-2147483648");
   CHECK_STR(ev("page(-1)"), "63");
   CHECK_STR(ev("LOW(0x1234)"), "52");
@@ -455,6 +458,30 @@ int main(void)
     CHECK_STR(ev("- - - - - - - - - - - - - - - - - - - - 5"), "5");
     CHECK_STR(ev("1?1?1?1?1:2:3:4:5"), "1");
   }
+
+  CHECK(exprIsBuiltinName("low", 3));
+  CHECK(exprIsBuiltinName("BYTE1", 5));
+  CHECK(exprIsBuiltinName("strlen", 6));
+  CHECK(exprIsBuiltinName("defined", 7));
+  CHECK(exprIsBuiltinName("Pc", 2));
+  CHECK(!exprIsBuiltinName("lo", 2));
+  CHECK(!exprIsBuiltinName("org", 3));
+  CHECK(!exprIsBuiltinName("min", 3));
+
+  CHECK_STR(ev("1 << 64"), "error");
+  CHECK_STR(ev("1 << -1"), "error");
+  CHECK_STR(ev("16 >> 70"), "error");
+  CHECK_STR(ev("1 << 63 >> 63"), "-1");
+  CHECK_STR(ev("2.5"), "error");
+  CHECK_STR(ev("int(5)"), "error");
+  CHECK_STR(ev("q15(0)"), "error");
+
+  wide = 1;
+  CHECK_STR(ev("1 << 40"), "1099511627776");
+  CHECK_STR(ev("0x123456789ABCDEF0"), "1311768467463790320");
+  CHECK_STR(ev("-1"), "-1");
+  CHECK_STR(ev("1 << 64"), "error");
+  wide = 0;
 
   return TEST_RESULT();
 }

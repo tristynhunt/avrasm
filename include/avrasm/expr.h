@@ -42,4 +42,11 @@ typedef struct ExprValue
 // lexer already reported), *out is {0, 0} and the cursor is somewhere inside the expression.
 int exprEval(TokenCursor *cur, const ExprEnv *env, ExprValue *out);
 
+// the same without the cut and its check, the 64-bit result. only for .dq
+int exprEvalWide(TokenCursor *cur, const ExprEnv *env, ExprValue *out);
+
+// is name[0..len) one of the names the expressions keep for themselves.
+// a built-in function or pc is refused and reported.
+int exprIsBuiltinName(const char *name, size_t len);
+
 #endif

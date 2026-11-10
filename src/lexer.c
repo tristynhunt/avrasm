@@ -134,6 +134,7 @@ static Token lexNumber(Lexer *lx)
 
   uint64_t val = 0;
   int digits = 0;
+  int tooBig = 0;
   for (uint32_t i = wordStart; i < p; i++) {
     if (text[i] == '_') continue;
     int d = digitValue(text[i]);
@@ -142,12 +143,13 @@ static Token lexNumber(Lexer *lx)
       lx->pos = p;
       return fail(lx, start, "invalid digit '%c' in %s literal", text[i], radixName);
     }
-    // avrasm2.exe keeps the lower 64-bits and does not err
+    if (val > (UINT64_MAX - (uint64_t)d) / (uint64_t)radix) tooBig = 1;
     val = val * (uint64_t)radix + (uint64_t)d;
     digits++;
   }
   lx->pos = p;
   if (digits == 0) return fail(lx, start, "expected digits in %s literal", radixName);
+  if (tooBig) return fail(lx, start, "this %s literal does not fit in 64 bits", radixName);
   Token t = make(lx, TOK_NUMBER, start);
   t.value = val;
   return t;

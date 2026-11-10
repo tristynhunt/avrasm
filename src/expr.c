@@ -103,7 +103,8 @@ static int applyBinary(Eval *e, const Token *op, ExprValue l, ExprValue r, ExprV
 {
   if ((op->kind == TOK_SLASH || op->kind == TOK_PERCENT) && r.known && !r.value)
     return fail(e, op->span, "division by zero");
-  
+  if ((op->kind == TOK_SHL || op->kind == TOK_SHR) && r.known && (r.value < 0 || r.value > 63))
+    return fail(e, op->span, "shift count %lld is out of range (0 to 63)", (long long)r.value);
   out->value = 0;
   out->known = l.known && r.known;
   if (!out->known) return 1;
@@ -115,8 +116,8 @@ static int applyBinary(Eval *e, const Token *op, ExprValue l, ExprValue r, ExprV
     case TOK_STAR: out->value = (int64_t)(a * b); break;
     case TOK_SLASH: out->value = r.value == -1 ? (int64_t)(0 - a) : l.value / r.value; break;
     case TOK_PERCENT: out->value = r.value == -1 ? 0 : l.value % r.value; break;
-    case TOK_SHL: out->value = (int64_t)(a << (b & 63)); break;
-    case TOK_SHR: out->value = shiftRight(l.value, (unsigned)(b & 63)); break;
+    case TOK_SHL: out->value = (int64_t)(a << b); break;
+    case TOK_SHR: out->value = shiftRight(l.value, (unsigned)b); break;
     case TOK_LT: out->value = l.value < r.value; break;
     case TOK_GT: out->value = l.value > r.value; break;
     case TOK_LE: out->value = l.value <= r.value; break;
@@ -139,7 +140,7 @@ typedef enum Func
 {
   FN_LOW, FN_HIGH, FN_BYTE3, FN_BYTE4, 
   FN_LWRD, FN_HWRD, FN_PAGE, FN_EXP2, FN_LOG2, FN_ABS,
-  FN_LATER // this is stuff im too lazy to implement yet
+  FN_FLOAT, FN_LATER // this is stuff im too lazy to implement yet
 } Func;
 
 typedef struct FuncEntry {
@@ -148,10 +149,11 @@ typedef struct FuncEntry {
 } FuncEntry;
 
 static const FuncEntry funcs[] = {
-  { "byte2", FN_HIGH }, { "byte3", FN_BYTE3 }, { "byte4", FN_BYTE4 }, { "page", FN_PAGE },
-  { "low", FN_LOW },    { "high", FN_HIGH },   { "lwrd", FN_LWRD },   { "hwrd", FN_HWRD }, 
-  { "exp2", FN_EXP2 },  { "log2", FN_LOG2 },   { "abs", FN_ABS },     { "int", FN_LATER },
-  { "frac", FN_LATER }, { "q7", FN_LATER },    { "q15", FN_LATER },   { "strlen", FN_LATER },
+  { "low", FN_LOW },     { "byte1", FN_LOW },   { "high", FN_HIGH },  { "byte2", FN_HIGH },
+  { "byte3", FN_BYTE3 }, { "byte4", FN_BYTE4 }, { "lwrd", FN_LWRD },  { "hwrd", FN_HWRD },
+  { "page", FN_PAGE },   { "exp2", FN_EXP2 },   { "log2", FN_LOG2 },  { "abs", FN_ABS },
+  { "int", FN_FLOAT },   { "frac", FN_FLOAT },  { "q7", FN_FLOAT },   { "q15", FN_FLOAT },
+  { "strlen", FN_LATER },
 };
 
 static int applyFunc(Eval *e, Func fn, const Token *name, ExprValue arg, ExprValue *out)
@@ -174,17 +176,11 @@ static int applyFunc(Eval *e, Func fn, const Token *name, ExprValue arg, ExprVal
     case FN_HWRD: out->value = (int64_t)((v >> 16) & 0xFFFF); break;
     case FN_PAGE: out->value = (int64_t)((v >> 16) & 0x3F); break;
     case FN_EXP2:
-      if ((uint32_t)v >= 0x80000000u) return fail(e, name->span, "exp2 needs a positive argument");
-      out->value = (int64_t)1 << (v & 31); // avrasm2 counts wraps at 32-bits here...
+      if (arg.value < 0 || arg.value > 31) return fail(e, name->span, "exp2 needs an argument from 0 to 31");
+      out->value = (int64_t)1 << arg.value;
       break;
     case FN_LOG2: {
-
-      v &= 0xFFFFFFFFu; // log2 sees arguments as 32-bit unsigned numbers
-      if (v == 0) {
-        // it also just allows this...
-        out->value = -1;
-        break;
-      }
+      if (arg.value < 1 || arg.value > 0xFFFFFFFF) return fail(e, name->span, "log2 needs an argument from 1 to 0xFFFFFFFF");
       int n = 0;
       while (v > 1) {
         v >>= 1;
@@ -194,6 +190,7 @@ static int applyFunc(Eval *e, Func fn, const Token *name, ExprValue arg, ExprVal
       break;
     }
     case FN_ABS: out->value = arg.value < 0 ? (int64_t)(0 - v) : arg.value; break;
+    case FN_FLOAT:
     case FN_LATER: return fail(e, name->span, "internal error: unsupported function reached applyFunc");
   }
   return 1;
@@ -234,6 +231,8 @@ static int parseIdent(Eval *e, ExprValue *out)
   // a name existing in the funcs[] array
   for (size_t i = 0; i < sizeof funcs / sizeof funcs[0]; i++) {
     if (!nameIs(text, len, funcs[i].name)) continue;
+    if (funcs[i].fn == FN_FLOAT)
+      return fail(e, name->span, "%.*s works on floating-point values, which are not supported", (int)len, text);
     if (funcs[i].fn == FN_LATER) return fail(e, name->span, "this function is not supported yet");
     if (!expect(e, TOK_LPAREN, "'(' after a function name")) return 0;
     ExprValue arg;
@@ -315,7 +314,7 @@ static int parseUnary(Eval *e, ExprValue *out)
 static int parseBinary(Eval *e, int minPrec, ExprValue *out)
 {
   ExprValue lhs;
-  if(!parseUnary(e, &lhs)) return 0;
+  if (!parseUnary(e, &lhs)) return 0;
   while(1) {
     const Token *op = cursorPeek(e->cur);
     int prec = binaryPrec(op->kind);
@@ -366,20 +365,36 @@ static int parseTernary(Eval *e, ExprValue *out)
   return ok;
 }
 
-int exprEval(TokenCursor *cur, const ExprEnv *env, ExprValue *out)
+int exprEvalWide(TokenCursor *cur, const ExprEnv *env, ExprValue *out)
 {
   Eval e = { cur, env, 0 };
-  ExprValue result;
-  
-  if (!parseTernary(&e, &result)) {
+  if (parseTernary(&e, out)) return 1;
+  out->value = 0;
+  out->known = 0;
+  return 0;
+}
+
+int exprEval(TokenCursor *cur, const ExprEnv *env, ExprValue *out)
+{
+  Span at = cursorPeek(cur)->span;
+  if (!exprEvalWide(cur, env, out)) return 0;
+  if (!out->known) return 1;
+  if (out->value < INT32_MIN || out->value > (int64_t)UINT32_MAX) {
+    diagEmit(env->diags, DIAG_ERROR, at, "%lld does not fit in 32 bits", (long long)out->value);
     out->value = 0;
     out->known = 0;
     return 0;
   }
-
-  *out = result;
   // thats one cursed cast...
-  if (out->known) out->value = (int64_t)(int32_t)(uint32_t)(uint64_t)result.value;
-
+  out->value = (int64_t)(int32_t)(uint32_t)(uint64_t)out->value;
   return 1;
+}
+
+int exprIsBuiltinName(const char *name, size_t len)
+{
+  if (nameIs(name, len, "pc") || nameIs(name, len, "defined")) return 1;
+  for (size_t i = 0; i < sizeof funcs / sizeof funcs[0]; i++) {
+    if (nameIs(name, len, funcs[i].name)) return 1;
+  }
+  return 0;
 }
