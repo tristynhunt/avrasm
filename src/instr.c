@@ -183,7 +183,7 @@ int instrParseOperands(const InstrDesc *d, const TokenLine *line, uint32_t from,
 // a register operand no lower than r<lo>. reports why not and returns 0
 static int needRegister(const Operand *op, const ExprEnv *env, int lo, int hi, int *reg)
 {
-  if (!operandRegister(op, env->sources, reg)) {
+  if (!operandRegisterEnv(op, env, reg)) {
     diagEmit(env->diags, DIAG_ERROR, op->span, "expected a register, r%d to r%d", lo, hi);
     return 0;
   }
@@ -207,7 +207,7 @@ static int needPair(const Operand *op, const ExprEnv *env, int *low)
     loOp.tokens.tokens = loToks;
     loOp.tokens.count = 2;
     int hi, lo;
-    if (!operandRegister(&hiOp, env->sources, &hi) || !operandRegister(&loOp, env->sources, &lo)) {
+    if (!operandRegisterEnv(&hiOp, env, &hi) || !operandRegisterEnv(&loOp, env, &lo)) {
       diagEmit(env->diags, DIAG_ERROR, op->span, "expected a register pair like r25:r24");
       return 0;
     }

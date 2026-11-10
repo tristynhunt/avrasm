@@ -49,4 +49,7 @@ int parseRegisterName(const char *name, size_t len, int *reg);
 // if true, stores that register number in *reg
 int operandRegister(const Operand *op, const SourceMap *sources, int *reg);
 
+// operandRegister, and also a name that .def gave to a register.
+int operandRegisterEnv(const Operand *op, const ExprEnv *env, int *reg);
+
 #endif

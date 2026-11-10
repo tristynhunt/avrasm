@@ -77,7 +77,7 @@ static const char *tokenText(const Asm *a, const Token *t, size_t *len)
 
 static ExprEnv makeEnv(Asm *a, int64_t pc)
 {
-  ExprEnv env = { &a->ctx->sources, &a->ctx->diags, symtabLookup, &a->syms, 0, pc };
+  ExprEnv env = { &a->ctx->sources, &a->ctx->diags, symtabLookup, &a->syms, 0, pc, NULL };
   return env;
 }
 

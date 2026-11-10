@@ -27,7 +27,7 @@ static void fxInit(Fx *f, const char *src)
 
 static ExprEnv envOf(Fx *f)
 {
-  ExprEnv env = { &f->map, &f->diags, symtabLookup, &f->syms, 0, 0 };
+  ExprEnv env = { &f->map, &f->diags, symtabLookup, &f->syms, 0, 0, NULL };
   return env;
 }
 
@@ -42,6 +42,14 @@ static const char *spans(Fx *f, const Operand *ops, int n)
              file->text + ops[i].span.start);
   }
   return out;
+}
+
+static int fakeAliases(void *user, const char *name, size_t len, int *reg)
+{
+  (void)user;
+  if (len != 4 || strncmp(name, "temp", 4) != 0) return 0;
+  *reg = 20;
+  return 1;
 }
 
 int main(void)
@@ -231,6 +239,23 @@ int main(void)
     CHECK(!operandRegister(&ops[3], &f.map, &r));
     CHECK(operandRegister(&ops[4], &f.map, &r));
     CHECK_INT(r, 3);
+    arenaFree(&f.arena);
+  }
+  {
+    Fx f;
+    fxInit(&f, "x r16, temp, other, temp+1\n");
+    int n = splitOperands(&f.line, 1, &f.arena, &f.diags, ops, 8);
+    CHECK_INT(n, 4);
+    ExprEnv env = envOf(&f);
+    int r = -1;
+    CHECK(operandRegisterEnv(&ops[0], &env, &r));
+    CHECK_INT(r, 16);
+    CHECK(!operandRegisterEnv(&ops[1], &env, &r));
+    env.lookupRegister = fakeAliases;
+    CHECK(operandRegisterEnv(&ops[1], &env, &r));
+    CHECK_INT(r, 20);
+    CHECK(!operandRegisterEnv(&ops[2], &env, &r));
+    CHECK(!operandRegisterEnv(&ops[3], &env, &r));
     arenaFree(&f.arena);
   }
 

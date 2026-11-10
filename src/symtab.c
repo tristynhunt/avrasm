@@ -104,6 +104,21 @@ Symbol *symtabAdd(Symtab *t, const char *name, size_t len, SymKind kind,
   return sym;
 }
 
+Symbol *symtabAssign(Symtab *t, const char *name, size_t len, int64_t value, 
+  Span defined, const Symbol **existing)
+{
+  const Symbol *found = symtabFind(t, name, len);
+  if (found == NULL) return symtabAdd(t, name, len, SYM_SET, value, defined, NULL);
+  if (found->kind != SYM_SET) {
+    if (existing != NULL) *existing = found;
+    return NULL;
+  }
+  Symbol *s = (Symbol *)found;
+  s->value = value;
+  s->defined = defined;
+  return s;
+}
+
 int symtabLookup(void *user, const char *name, size_t len, int64_t *value)
 {
   const Symbol *s = symtabFind((const Symtab *)user, name, len);

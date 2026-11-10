@@ -126,6 +126,27 @@ int main(void)
     CHECK_INT(v, -1);
   }
 
+  {
+    Symtab t;
+    symtabInit(&t, &arena, 0);
+    const Symbol *old = NULL;
+    Symbol *a = symtabAssign(&t, "x", 1, 1, at(0, 1), &old);
+    REQUIRE(a != NULL);
+    CHECK_INT(a->kind, SYM_SET);
+    CHECK_INT(a->value, 1);
+    Symbol *b = symtabAssign(&t, "X", 1, 2, at(10, 11), &old);
+    CHECK(b == a);
+    CHECK_INT(symtabFind(&t, "x", 1)->value, 2);
+    CHECK_INT(symtabFind(&t, "x", 1)->defined.start, 10);
+    CHECK_INT(t.count, 1);
+    symtabAdd(&t, "lbl", 3, SYM_LABEL, 7, at(20, 23), NULL);
+    CHECK(symtabAssign(&t, "lbl", 3, 9, at(30, 33), &old) == NULL);
+    CHECK(old != NULL && old->kind == SYM_LABEL);
+    CHECK_INT(symtabFind(&t, "lbl", 3)->value, 7);
+    symtabAdd(&t, "k", 1, SYM_EQU, 5, at(40, 41), NULL);
+    CHECK(symtabAssign(&t, "k", 1, 6, at(50, 51), NULL) == NULL);
+  }
+
   arenaFree(&arena);
   return TEST_RESULT();
 }

@@ -10,7 +10,8 @@
 typedef enum SymKind
 {
   SYM_LABEL,  // name at the current PC (a word address in code)
-  SYM_EQU     // .equ name = expr
+  SYM_EQU,    // .equ name = expr,
+  SYM_SET     // .set name = expr: may get a new val later
 } SymKind;
 
 typedef struct Symbol
@@ -41,6 +42,12 @@ const Symbol *symtabFind(const Symtab *t, const char *name, size_t len);
 // and if 'existing' is not NULL, stores the symbol already there.
 Symbol *symtabAdd(Symtab *t, const char *name, size_t len, SymKind kind, 
   int64_t value, Span defined, const Symbol **existing);
+
+// defines a symbol as a .set symbol, or gives a new value to one that already exists.
+// a name that is taken by a label or .equ symbol is left alone and returns NULL and
+// stores the existing symbol.
+Symbol *symtabAssign(Symtab *t, const char *name, size_t len, int64_t value,
+  Span defined, const Symbol **existing);
 
 // an ExprEnv.lookup that searches a Symtab
 int symtabLookup(void *user, const char *name, size_t len, int64_t *value);

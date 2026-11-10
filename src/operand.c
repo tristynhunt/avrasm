@@ -128,3 +128,13 @@ int operandRegister(const Operand *op, const SourceMap *sources, int *reg)
   if (f == NULL) return 0;
   return parseRegisterName(f->text + t->span.start, t->span.end - t->span.start, reg);
 }
+
+int operandRegisterEnv(const Operand *op, const ExprEnv *env, int *reg)
+{
+  if (operandRegister(op, env->sources, reg)) return 1;
+  if (env->lookupRegister == NULL || op->tokens.count != 2 || op->tokens.tokens[0].kind != TOK_IDENT) return 0;
+  const Token *t = &op->tokens.tokens[0];
+  const SourceFile *f = sourceMapGet(env->sources, t->span.file);
+  if (f == NULL) return 0;
+  return env->lookupRegister(env->user, f->text + t->span.start, t->span.end - t->span.start, reg);
+}
