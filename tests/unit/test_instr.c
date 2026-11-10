@@ -96,9 +96,9 @@ int main(void)
     CHECK(instrFind("nop", 3) != NULL);
     CHECK(instrFind("out", 3) != NULL);
     CHECK(instrFind("ldx", 3) == NULL);
-    CHECK(instrFind("ld", 2) == NULL);
+    CHECK(instrFind("rjm", 3) == NULL);
+    CHECK(instrFind("rjmp", 3) == NULL);
     CHECK(instrFind("ldi2", 4) == NULL);
-    CHECK(instrFind("ldi", 2) == NULL);
     CHECK(instrFind("ldi", 0) == NULL);
     CHECK(instrFind("", 0) == NULL);
     CHECK(instrFind("ldi\0x", 5) == NULL);
