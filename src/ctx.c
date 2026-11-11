@@ -78,3 +78,13 @@ FileId ctxLoad(AvrCtx *c, const char *path, Span from)
   
   return id;
 }
+
+FileId ctxLoadQuiet(AvrCtx *c, const char *path)
+{
+  size_t len = 0;
+  char *text = c->vfs.read(c->vfs.user, path, &len);
+  if (text == NULL) return FILE_NONE;
+  FileId id = sourceMapAdd(&c->sources, path, text, len);
+  free(text);
+  return id;
+}

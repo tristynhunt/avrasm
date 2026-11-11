@@ -40,4 +40,9 @@ void ctxFree(AvrCtx *c);
 // if the file cannot be read or is too big, an error is emitted
 FileId ctxLoad(AvrCtx *c, const char *path, Span from);
 
+// the same as ctxLoad, for a file that may not be there.
+// no diagnostic are given. returns FILE_NONE if 'path' cannot be read (or is too big)
+// .include uses it to try one place after another
+FileId ctxLoadQuiet(AvrCtx *c, const char *path);
+
 #endif

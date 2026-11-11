@@ -117,8 +117,8 @@ int main(void)
   bad("ldi r16, 256\n", 1, 9);
   bad("ldi r16, 0b2\n", 1, 9);
   bad(".cseg 5\n", 1, 6);
-  bad(".macro\n", 1, 0);
-  bad(".include \"x\"\n", 1, 0);
+  bad(".dd 1\n", 1, 0);
+  bad(".dq 1\n", 1, 0);
   bad(".or 1\n", 1, 0);
   bad(".cse\n", 1, 0);
   bad(".orgg 1\n", 1, 0);
@@ -179,6 +179,12 @@ int main(void)
     CHECK_INT(r.ctx.diags.count, 0);
     CHECK(strstr(r.text, "002710: 07 e8\n") != NULL);
     ctxFree(&r.ctx);
+  }
+
+  {
+    const char *src = ".macro m\n  ldi r16, @0\n.endm\nm 300\n";
+    bad(src, 1, (uint32_t)(strstr(src, "300") - src));
+    good(".macro m\n  ldi r16, @0\n.endm\nm 0x55\n", "000000: 05 e5\n");
   }
 
   return TEST_RESULT();

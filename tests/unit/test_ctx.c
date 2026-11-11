@@ -155,6 +155,15 @@ int main(void)
   ctxFree(&ctx);
 
   ctxInit(&ctx, vfs);
+  unsigned before = ctx.diags.count;
+  CHECK(ctxLoadQuiet(&ctx, "nope.inc") == FILE_NONE);
+  CHECK_INT(ctx.diags.count, before);
+  FileId quiet = ctxLoadQuiet(&ctx, "b.inc");
+  CHECK(quiet != FILE_NONE);
+  CHECK_STR(sourceMapGet(&ctx.sources, quiet)->text, "nop");
+  ctxFree(&ctx);
+
+  ctxInit(&ctx, vfs);
   CHECK(ctxLoad(&ctx, "b.inc", top) == 0);
   ctxFree(&ctx);
 

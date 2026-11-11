@@ -26,7 +26,8 @@ Operand makeOperand(const TokenLine *line, uint32_t from, uint32_t to, Arena *ar
   op.tokens.count = count + 1;
   op.span.file = first.file;
   op.span.start = first.start;
-  op.span.end = last.end;
+  // this now accounts for macros and their tokens coming form different places
+  op.span.end = (first.file == last.file && last.end >= first.start) ? last.end : first.end;
   return op;
 }
 

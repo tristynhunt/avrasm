@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "avrasm/arena.h"
@@ -12,6 +13,7 @@
 #include "avrasm/instr.h"
 #include "avrasm/lexer.h"
 #include "avrasm/operand.h"
+#include "avrasm/reader.h"
 #include "avrasm/source.h"
 #include "avrasm/symtab.h"
 #include "avrasm/tokline.h"
@@ -41,7 +43,8 @@ typedef enum StmtKind
   STMT_DW,
   STMT_BYTE,
   STMT_DEF,
-  STMT_UNDEF
+  STMT_UNDEF,
+  STMT_DEVICE // .device NAME
 } StmtKind;
 
 // one parsed line. does not look at values (pass 1 and 2 do).
@@ -62,6 +65,8 @@ typedef struct Stmt
   Seg target;             // STMT_SEG
   Seg seg;                // set by pass 1
   int64_t pc;   // the word address of this statement
+  uint32_t scope;         // 0, or the macro expansion it is in.
+  Span callSite;          // the macro call it came out of or FILE_NONE if not a macro
   struct Stmt *next;
 } Stmt;
 
@@ -83,9 +88,15 @@ typedef struct Asm
   Image *eeprom;
   Symtab syms;
   Alias *aliases;
-  const Stmt *encoding; // pass 2, the statement being encoded
   Stmt *first;
   Stmt *last;
+  Reader *reader;
+  Seg cur;                 // pass 1: the segment in force
+  int64_t pos[SEG_COUNT];  // pass 1: the counter of each segment
+  uint32_t scope;          // the scope of the statement being handled: symbol lookups use it
+  const Stmt *encoding;    // pass 2: the statement being encoded (NULL in pass 1)
+  Token device;            // .device NAME
+  int hasDevice;
 } Asm;
 
 // ------- helpers -------------------------------------------------------
@@ -144,6 +155,16 @@ static const char *tokenText(const Asm *a, const Token *t, size_t *len)
   return f->text + t->span.start;
 }
 
+#define SCOPED_MAX 256
+
+static size_t scopedName(char *buf, size_t cap, const char *name, size_t len, uint32_t scope)
+{
+  if (len + 12 > cap) return 0;
+  memcpy(buf, name, len);
+  buf[len] = '\x01';
+  return len + 1 + (size_t)snprintf(buf + len + 1, 11, "%u", scope);
+}
+
 // checks if a .set of this name comes before the statement being enconded.
 static int setComesFirst(const Asm *a, const char *name, size_t len)
 {
@@ -160,6 +181,12 @@ static int setComesFirst(const Asm *a, const char *name, size_t len)
 static int lookupSymbol(void *user, const char *name, size_t len, int64_t *value)
 {
   Asm *a = user;
+  if (a->scope != 0) {
+    // the labels of this macro expansion first
+    char buf[SCOPED_MAX];
+    size_t n = scopedName(buf, sizeof buf, name, len, a->scope);
+    if (n != 0 && symtabLookup(&a->syms, buf, n, value)) return 1;
+  }
   const Symbol *sym = symtabFind(&a->syms, name, len);
   if (sym == NULL) return 0;
   if (sym->kind == SYM_SET && a->encoding != NULL && !setComesFirst(a, name, len)) {
@@ -306,6 +333,19 @@ static void parseDirective(Asm *a, const TokenLine *line, uint32_t from, Stmt *s
     } else {
       s->name = s->ops[0].tokens.tokens[0];
     }
+  } else if (equalsNoCase(text, len, ".device")) {
+    s->kind = STMT_DEVICE;
+    uint32_t last = line->count - 1;
+    const Token *nameTok = &line->tokens[from < last ? from : last];
+    if (nameTok->kind != TOK_IDENT || from + 1 != last) {
+      if (nameTok->kind != TOK_ERROR) diagEmit(diags, DIAG_ERROR, nameTok->span, ".device needs a device name");
+      s->bad = 1;
+    } else {
+      s->name = *nameTok;
+    }
+  } else if (equalsNoCase(text, len, ".list") || equalsNoCase(text, len, ".nolist") || equalsNoCase(text, len, ".listmac") || 
+      equalsNoCase(text, len, ".overlap") || equalsNoCase(text, len, ".nooverlap")) {
+    if (!expectOperands(line, from, arena, diags, "this directive", 0, NULL)) s->bad = 1;
   } else {
     diagEmit(diags, DIAG_ERROR, s->head.span, "directive %.*s is not supported yet", (int)len, text);
     s->bad = 1;
@@ -327,11 +367,14 @@ static void parseInstruction(Asm *a, const TokenLine *line, uint32_t from, Stmt 
   if (!instrParseOperands(s->instr, line, from, &a->ctx->arena, &a->ctx->diags, s->ops)) s->bad = 1;
 }
 
-// turns one line into a statement and appends it to the list
-static void parseLine(Asm *a, const TokenLine *line)
+// turns one line into a statement and appends it to the list.
+// returns the statement, or NULL for a blank line
+static Stmt *parseLine(Asm *a, const TokenLine *line, uint32_t scope, Span callSite)
 {
   Stmt s;
   memset(&s, 0, sizeof s);
+  s.scope = scope;
+  s.callSite = callSite;
   TokenCursor cur;
   cursorInit(&cur, line);
 
@@ -358,13 +401,14 @@ static void parseLine(Asm *a, const TokenLine *line)
     }
   }
 
-  if (!s.hasLabel && s.kind == STMT_EMPTY && !s.bad) return;
+  if (!s.hasLabel && s.kind == STMT_EMPTY && !s.bad) return NULL;
 
   Stmt *keep = arenaAlloc(&a->ctx->arena, sizeof *keep, _Alignof(Stmt));
   *keep = s;
   if (a->last == NULL) a->first = keep;
   else a->last->next = keep;
   a->last = keep;
+  return keep;
 }
 
 // ------- pass 1: address & symbols -------------------------------------
@@ -389,6 +433,10 @@ static int nameIsFree(Asm *a, const Token *name)
     diagEmit(diags, DIAG_ERROR, name->span, "'%.*s' is a register alias (.def) and cannot be a symbol", (int)len, text);
     return 0;
   }
+  if (readerHasMacro(a->reader, text, len)) {
+    diagEmit(diags, DIAG_ERROR, name->span, "'%.*s' is the name of a macro and cannot be a symbol", (int)len, text);
+    return 0;
+  }
   return 1;
 }
 
@@ -403,6 +451,70 @@ static void defineSymbol(Asm *a, const Token *name, SymKind kind, int64_t value)
   if (symtabAdd(&a->syms, text, len, kind, value, name->span, &existing) != NULL) return;
   diagEmit(diags, DIAG_ERROR, name->span, "symbol '%.*s' is already defined", (int)len, text);
   diagEmit(diags, DIAG_INFO, existing->defined, "the first definition is here");
+}
+
+// a label. inside a macro expansion it is private to that expansion (every call can have its own 'loop:'),
+// so it is stored under a scoped name. that is also why it may share its name with a global label.
+// inside the expansion the private one is found first (lookupSymbol) and outside there is only the global one.
+static void defineLabel(Asm *a, const Token *name, int64_t value)
+{
+  if (a->scope == 0) {
+    defineSymbol(a, name, SYM_LABEL, value);
+    return;
+  }
+  if (!nameIsFree(a, name)) return;
+  size_t len;
+  const char *text = tokenText(a, name, &len);
+  char buf[SCOPED_MAX];
+  size_t n = scopedName(buf, sizeof buf, text, len, a->scope);
+  if (n == 0) {
+    diagEmit(&a->ctx->diags, DIAG_ERROR, name->span, "this label name is too long to be used inside a macro");
+    return;
+  }
+  const Symbol *existing = NULL;
+  if (symtabAdd(&a->syms, buf, n, SYM_LABEL, value, name->span, &existing) == NULL) {
+    diagEmit(&a->ctx->diags, DIAG_ERROR, name->span, 
+      "label '%.*s' is already defined in this macro call", (int)len, text);
+    diagEmit(&a->ctx->diags, DIAG_INFO, existing->defined, "the first definition is here");
+  }
+}
+
+static int hookEval(void *user, TokenCursor *cur, int64_t *value)
+{
+  Asm *a = user;
+  ExprEnv env = makeEnv(a, a->pos[a->cur]);
+  ExprValue v;
+  if (!exprEval(cur, &env, &v)) return 0;
+  *value = v.value;
+  return 1;
+}
+
+// defined so far. a label, an .equ or .set symbol, or a .def alias that earlier lines made
+static int hookIsDefined(void *user, const char *name, size_t len)
+{
+  Asm *a = user;
+  int reg;
+  return symtabFind(&a->syms, name, len) != NULL || lookupRegister(a, name, len, &reg);
+}
+
+// checks if 'name' can be the name of a macro.
+static int hookNameOk(void *user, const Token *name)
+{
+  Asm *a = user;
+  size_t len;
+  const char *text = tokenText(a, name, &len);
+  // a keyword is never a register name
+  const char *what = keywordKind(text, len);
+  int reg;
+  if (what == NULL) {
+    if (isReservedName(text, len)) what = "a register name";
+    else if (symtabFind(&a->syms, text, len) != NULL) what = "a symbol";
+    else if (lookupRegister(a, text, len, &reg)) what = "a register alias";
+  }
+  if (what == NULL) return 1;
+  diagEmit(&a->ctx->diags, DIAG_ERROR, name->span, 
+    "'%.*s' is %s and cannot be the name of a macro", (int)len, text, what);
+  return 0;
 }
 
 // .set: defines the name or gives it a new vaule. returns 0 on any error.
@@ -496,96 +608,115 @@ static int64_t segmentEnd(const Asm *a, Seg seg)
 // both avrasm2 and avra start at this address when no device is specified.
 #define DATA_START 0x60
 
-static void pass1(Asm *a)
+static void pass1Init(Asm *a)
 {
-  int64_t pos[SEG_COUNT] = { 0, DATA_START, 0 };
-  Seg cur = SEG_CODE;
-  for (Stmt *s = a->first; s != NULL; s = s->next) {
-    s->seg = cur;
-    s->pc = pos[cur];
-    if (s->hasLabel) defineSymbol(a, &s->label, SYM_LABEL, pos[cur]);
-    if (s->bad) {
-      if (s->kind == STMT_INSTR && cur == SEG_CODE) pos[cur] += s->instr->words;
-      continue;
-    }
+  a->pos[SEG_CODE] = 0;
+  a->pos[SEG_DATA] = DATA_START;
+  a->pos[SEG_EEPROM] = 0;
+  a->cur = SEG_CODE;
+}
 
-    ExprEnv env = makeEnv(a, pos[cur]);
-    ExprValue v;
-    switch (s->kind) {
-      case STMT_EMPTY:
-        break;
+static void pass1Stmt(Asm *a, Stmt *s)
+{
+  int64_t *pos = a->pos;
+  Seg cur = a->cur;
+  s->seg = cur;
+  s->pc = pos[cur];
+  if (s->hasLabel) defineLabel(a, &s->label, pos[cur]);
+  if (s->bad) {
+    if (s->kind == STMT_INSTR && cur == SEG_CODE) pos[cur] += s->instr->words;
+    return;
+  }
 
-      case STMT_DEF:
-        if (!addAlias(a, s, 1)) s->bad = 1;
-        break;
-
-      case STMT_UNDEF:
-        if (!removeAlias(a, s, 1)) s->bad = 1;
-        break;
-
-      case STMT_SEG:
-        cur = s->target;
-        break;
-
-      case STMT_INSTR:
-        if (cur != SEG_CODE) {
-          diagEmit(env.diags, DIAG_ERROR, s->head.span, "instructions can only be placed in .cseg");
-          s->bad = 1;
-          break;
+  ExprEnv env = makeEnv(a, pos[cur]);
+  ExprValue v;
+  switch (s->kind) {
+    case STMT_EMPTY:
+      break;
+    
+    case STMT_DEVICE:
+      if (a->hasDevice) {
+        size_t l1, l2;
+        const char *t1 = tokenText(a, &a->device, &l1);
+        const char *t2 = tokenText(a, &s->name, &l2);
+        if (!sameName(t1, l1, t2, l2)) {
+          diagEmit(env.diags, DIAG_WARNING, s->name.span, "the device is changed from %.*s to %.*s", (int)l1, t1, (int)l2, t2);
         }
-        pos[cur] += s->instr->words;
-        break;
+      }
+      a->device = s->name;
+      a->hasDevice = 1;
+      break;
 
-      case STMT_ORG:
-        if (!evalOperand(&s->ops[0], &env, &v)) break;
-        if (v.value < 0 || v.value > segmentEnd(a, cur)) {
-          diagEmit(env.diags, DIAG_ERROR, s->ops[0].span, 
-            ".org address %lld is outside the segment (0 to %lld)", (long long)v.value, (long long)segmentEnd(a, cur));
-          break;
-        }
-        pos[cur] = v.value;
-        break;
+    case STMT_DEF:
+      if (!addAlias(a, s, 1)) s->bad = 1;
+      break;
 
-      case STMT_EQU:
-        if (evalOperand(&s->ops[0], &env, &v)) defineSymbol(a, &s->name, SYM_EQU, v.value);
-        break;
+    case STMT_UNDEF:
+      if (!removeAlias(a, s, 1)) s->bad = 1;
+      break;
 
-      case STMT_SET:
-        if (!evalOperand(&s->ops[0], &env, &v) || !assignSymbol(a, &s->name, v.value)) s->bad = 1;
-        break;
+    case STMT_SEG:
+      cur = a->cur = s->target;
+      break;
 
-      case STMT_DB:
-      case STMT_DW:
-        if (cur == SEG_DATA) {
-          diagEmit(env.diags, DIAG_ERROR, s->head.span, 
-            "%s cannot give .dseg a value: .byte reserves the space, nothing initialises it",
-            s->kind == STMT_DB ? ".db" : ".dw");
-          s->bad = 1;
-          break;
-        }
-        if (cur == SEG_CODE) {
-          if (s->dataBytes & 1) {
-            diagEmit(env.diags, DIAG_WARNING, s->head.span, ".db in .cseg has an odd number of bytes: a zero byte is added");
-          }
-          pos[cur] += (s->dataBytes + 1) / 2;
-        } else {
-          pos[cur] += s->dataBytes;
-        }
+    case STMT_INSTR:
+      if (cur != SEG_CODE) {
+        diagEmit(env.diags, DIAG_ERROR, s->head.span, "instructions can only be placed in .cseg");
+        s->bad = 1;
         break;
+      }
+      pos[cur] += s->instr->words;
+      break;
 
-      case STMT_BYTE:
-        if (cur == SEG_CODE) {
-          diagEmit(env.diags, DIAG_ERROR, s->head.span, ".byte is not allowed in .cseg");
-          break;
-        }
-        if (!evalOperand(&s->ops[0], &env, &v)) break;
-        if (v.value < 0) {
-          diagEmit(env.diags, DIAG_ERROR, s->ops[0].span, ".byte needs a size of 0 or more, not %lld", (long long)v.value);
-          break;
-        }
-        pos[cur] += v.value;
+    case STMT_ORG:
+      if (!evalOperand(&s->ops[0], &env, &v)) break;
+      if (v.value < 0 || v.value > segmentEnd(a, cur)) {
+        diagEmit(env.diags, DIAG_ERROR, s->ops[0].span, 
+          ".org address %lld is outside the segment (0 to %lld)", (long long)v.value, (long long)segmentEnd(a, cur));
         break;
-    }
+      }
+      pos[cur] = v.value;
+      break;
+
+    case STMT_EQU:
+      if (evalOperand(&s->ops[0], &env, &v)) defineSymbol(a, &s->name, SYM_EQU, v.value);
+      break;
+
+    case STMT_SET:
+      if (!evalOperand(&s->ops[0], &env, &v) || !assignSymbol(a, &s->name, v.value)) s->bad = 1;
+      break;
+
+    case STMT_DB:
+    case STMT_DW:
+      if (cur == SEG_DATA) {
+        diagEmit(env.diags, DIAG_ERROR, s->head.span, 
+          "%s cannot give .dseg a value: .byte reserves the space, nothing initialises it",
+          s->kind == STMT_DB ? ".db" : ".dw");
+        s->bad = 1;
+        break;
+      }
+      if (cur == SEG_CODE) {
+        if (s->dataBytes & 1) {
+          diagEmit(env.diags, DIAG_WARNING, s->head.span, ".db in .cseg has an odd number of bytes: a zero byte is added");
+        }
+        pos[cur] += (s->dataBytes + 1) / 2;
+      } else {
+        pos[cur] += s->dataBytes;
+      }
+      break;
+
+    case STMT_BYTE:
+      if (cur == SEG_CODE) {
+        diagEmit(env.diags, DIAG_ERROR, s->head.span, ".byte is not allowed in .cseg");
+        break;
+      }
+      if (!evalOperand(&s->ops[0], &env, &v)) break;
+      if (v.value < 0) {
+        diagEmit(env.diags, DIAG_ERROR, s->ops[0].span, ".byte needs a size of 0 or more, not %lld", (long long)v.value);
+        break;
+      }
+      pos[cur] += v.value;
+      break;
   }
 }
 
@@ -655,16 +786,21 @@ static void emitData(Asm *a, const Stmt *s, const ExprEnv *env)
   else putBytes(a, s, a->eeprom, (uint64_t)s->pc, buf, n);
 }
 
+static void noteCallSite(Asm *a, Span callSite, uint32_t before);
+
 static void pass2(Asm *a)
 {
   a->aliases = NULL;
   for (Stmt *s = a->first; s != NULL; s = s->next) {
     if (s->bad) continue;
+    a->scope = s->scope;
     a->encoding = s;
+    uint32_t before = a->ctx->diags.count;
     ExprEnv env = makeEnv(a, s->pc);
     ExprValue v;
     switch (s->kind) {
       case STMT_EMPTY:
+      case STMT_DEVICE:
       case STMT_SEG:
       case STMT_ORG:
       case STMT_EQU:
@@ -695,13 +831,21 @@ static void pass2(Asm *a)
         break;
       }
     }
+    noteCallSite(a, s->callSite, before);
   }
+  a->scope = 0;
   a->encoding = NULL;
 }
 
 // ------- main driver ---------------------------------------------------
 
-int assembleAll(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom)
+static void noteCallSite(Asm *a, Span callSite, uint32_t before)
+{
+  if (callSite.file != FILE_NONE && a->ctx->diags.count > before) {
+    diagEmit(&a->ctx->diags, DIAG_INFO, callSite, "this line comes from the macro called here");
+  }
+}
+int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const AsmOptions *opt)
 {
   Asm a;
   memset(&a, 0, sizeof a);
@@ -710,17 +854,32 @@ int assembleAll(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom)
   a.eeprom = eeprom;
   symtabInit(&a.syms, &ctx->arena, 0);
 
-  Lexer lx;
-  lexerInit(&lx, &ctx->sources, file, &ctx->diags);
-  while (1) {
-    TokenLine line = lexLine(&lx, &ctx->arena);
-    parseLine(&a, &line);
-    if (line.tokens[line.count - 1].kind == TOK_EOF) break;
+  ReaderHooks hooks = { hookEval, hookIsDefined, hookNameOk, &a };
+  a.reader = readerCreate(ctx, &hooks, file, opt != NULL ? opt->includeDirs : NULL, opt != NULL ? opt->includeDirCount : 0);
+  if (opt != NULL) {
+    for (uint32_t i = 0; i < opt->defineCount; i++) readerDefine(a.reader, opt->defines[i]);
   }
 
-  pass1(&a);
+  pass1Init(&a);
+  ReaderLine rl;
+  while (1) {
+    a.scope = 0;
+    if (!readerNext(a.reader, &rl)) break;
+    uint32_t before = ctx->diags.count;
+    a.scope = rl.scope;
+    Stmt *s = parseLine(&a, &rl.line, rl.scope, rl.callSite);
+    if (s != NULL) pass1Stmt(&a, s);
+    noteCallSite(&a, rl.callSite, before);
+  }
+  a.scope = 0;
+
   pass2(&a);
   return !diagListHasErrors(&ctx->diags);
+}
+
+int assembleAll(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom)
+{
+  return assembleOpt(ctx, file, flash, eeprom, NULL);
 }
 
 int assemble(AvrCtx *ctx, FileId file, Image *image)
