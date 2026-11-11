@@ -117,8 +117,8 @@ int main(void)
   bad("ldi r16, 256\n", 1, 9);
   bad("ldi r16, 0b2\n", 1, 9);
   bad(".cseg 5\n", 1, 6);
-  bad(".db 1\n", 1, 0);
-  bad(".dseg\n", 1, 0);
+  bad(".macro\n", 1, 0);
+  bad(".include \"x\"\n", 1, 0);
   bad(".or 1\n", 1, 0);
   bad(".cse\n", 1, 0);
   bad(".orgg 1\n", 1, 0);
