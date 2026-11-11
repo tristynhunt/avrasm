@@ -41,6 +41,9 @@ int expectOperands(const TokenLine *line, uint32_t from, Arena *arena,
 // and error sets *out to { 0, 0 }
 int evalOperand(const Operand *op, const ExprEnv *env, ExprValue *out);
 
+// the same with exprEvalWide: the 64-bit value for .dq.
+int evalOperandWide(const Operand *op, const ExprEnv *env, ExprValue *out);
+
 // checks if name[0..len) is the name of a core register, r0 to r31 in any case.
 // if true, stores that register number in *reg
 int parseRegisterName(const char *name, size_t len, int *reg);

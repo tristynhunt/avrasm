@@ -85,11 +85,12 @@ int expectOperands(const TokenLine *line, uint32_t from, Arena *arena,
   return 1;
 }
 
-int evalOperand(const Operand *op, const ExprEnv *env, ExprValue *out)
+static int evalWith(const Operand *op, const ExprEnv *env, ExprValue *out,
+  int(*eval)(TokenCursor *, const ExprEnv *, ExprValue *))
 {
   TokenCursor c;
   cursorInit(&c, &op->tokens);
-  if(!exprEval(&c, env, out)) return 0;
+  if(!eval(&c, env, out)) return 0;
   if (!cursorAtEnd(&c)) {
     const Token *t = cursorPeek(&c);
     // left over TOK_ERROR has already been reported
@@ -99,6 +100,16 @@ int evalOperand(const Operand *op, const ExprEnv *env, ExprValue *out)
     return 0;
   }
   return 1;
+}
+
+int evalOperand(const Operand *op, const ExprEnv *env, ExprValue *out)
+{
+  return evalWith(op, env, out, exprEval);
+}
+
+int evalOperandWide(const Operand *op, const ExprEnv *env, ExprValue *out)
+{
+  return evalWith(op, env, out, exprEvalWide);
 }
 
 int parseRegisterName(const char *name, size_t len, int *reg)

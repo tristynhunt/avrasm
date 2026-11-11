@@ -41,6 +41,8 @@ typedef enum StmtKind
   STMT_SET,
   STMT_DB,
   STMT_DW,
+  STMT_DD,
+  STMT_DQ,
   STMT_BYTE,
   STMT_DEF,
   STMT_UNDEF,
@@ -243,6 +245,17 @@ static int isNameOnly(const Operand *op)
   return op->tokens.count == 2 && op->tokens.tokens[0].kind == TOK_IDENT;
 }
 
+// the size in bytes of one value of .db, .dw, .dd or .dq, and the directives name.
+static uint32_t dataUnit(StmtKind kind)
+{
+  return kind == STMT_DB ? 1 : kind == STMT_DW ? 2 : kind == STMT_DD ? 4 : 8;
+}
+
+static const char *dataName(StmtKind kind)
+{
+  return kind == STMT_DB ? ".db" : kind == STMT_DW ? ".dw" : kind == STMT_DD ? ".dd" : ".dq";
+}
+
 // .db and .dw: a comma-separated list of values. 'unit' is the size of one value in bytes.
 // fills s->itemCount and s->dataBytes, a string is its length in bytes.
 static void parseData(Asm *a, const TokenLine *line, uint32_t from, Stmt *s, const char *directive, uint32_t unit)
@@ -313,6 +326,12 @@ static void parseDirective(Asm *a, const TokenLine *line, uint32_t from, Stmt *s
   } else if (equalsNoCase(text, len, ".dw")) {
     s->kind = STMT_DW;
     parseData(a, line, from, s, ".dw", 2);
+  } else if (equalsNoCase(text, len, ".dd")) {
+    s->kind = STMT_DD;
+    parseData(a, line, from, s, ".dd", 4);
+  } else if (equalsNoCase(text, len, ".dq")) {
+    s->kind = STMT_DQ;
+    parseData(a, line, from, s, ".dq", 8);
   } else if (equalsNoCase(text, len, ".byte")) {
     s->kind = STMT_BYTE;
     if (!expectOperands(line, from, arena, diags, ".byte", 1, s->ops)) s->bad = 1;
@@ -688,10 +707,12 @@ static void pass1Stmt(Asm *a, Stmt *s)
 
     case STMT_DB:
     case STMT_DW:
+    case STMT_DD:
+    case STMT_DQ:
       if (cur == SEG_DATA) {
         diagEmit(env.diags, DIAG_ERROR, s->head.span, 
           "%s cannot give .dseg a value: .byte reserves the space, nothing initialises it",
-          s->kind == STMT_DB ? ".db" : ".dw");
+          dataName(s->kind));
         s->bad = 1;
         break;
       }
@@ -757,7 +778,7 @@ static int dataValue(const Operand *op, const ExprEnv *env, int64_t lo, int64_t 
 
 static void emitData(Asm *a, const Stmt *s, const ExprEnv *env)
 {
-  uint32_t unit = s->kind == STMT_DB ? 1 : 2;
+  uint32_t unit = dataUnit(s->kind);
   size_t total = s->dataBytes;
   if (s->seg == SEG_CODE && (total & 1)) total++;
   uint8_t *buf = arenaAlloc(&a->ctx->arena, total + 1, 1);
@@ -773,12 +794,19 @@ static void emitData(Asm *a, const Stmt *s, const ExprEnv *env)
       continue;
     }
     int64_t v;
-    if (!dataValue(item, env, unit == 1 ? -128 : -32768, unit == 1 ? 255 : 65535, &v)) {
+    if (unit == 8) {
+      ExprValue w;
+      if (!evalOperandWide(item, env, &w)) {
+        ok = 0;
+        continue;
+      }
+      v = w.value;
+    } else if (!dataValue(item, env, unit == 1 ? -128 : unit == 2 ? -32768 : INT32_MIN,
+        unit == 1 ? 255 : unit == 2 ? 65535 : (int64_t)UINT32_MAX, &v)) {
       ok = 0;
       continue;
     }
-    buf[n++] = (uint8_t)((uint64_t)v & 0xFF);
-    if (unit == 2) buf[n++] = (uint8_t)(((uint64_t)v >> 8) & 0xFF);
+    for (uint32_t b = 0; b < unit; b++) buf[n++] = (uint8_t)(((uint64_t)v >> (8 * b)) & 0xFF);
   }
   if (!ok) return;
   while (n < total) buf[n++] = 0;
@@ -817,6 +845,8 @@ static void pass2(Asm *a)
         break;
       case STMT_DB:
       case STMT_DW:
+      case STMT_DD:
+      case STMT_DQ:
         emitData(a, s, &env);
         break;
       case STMT_INSTR: {

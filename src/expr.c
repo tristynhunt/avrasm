@@ -140,7 +140,7 @@ typedef enum Func
 {
   FN_LOW, FN_HIGH, FN_BYTE3, FN_BYTE4, 
   FN_LWRD, FN_HWRD, FN_PAGE, FN_EXP2, FN_LOG2, FN_ABS,
-  FN_FLOAT, FN_LATER // this is stuff im too lazy to implement yet
+  FN_FLOAT, FN_STRLEN
 } Func;
 
 typedef struct FuncEntry {
@@ -153,7 +153,7 @@ static const FuncEntry funcs[] = {
   { "byte3", FN_BYTE3 }, { "byte4", FN_BYTE4 }, { "lwrd", FN_LWRD },  { "hwrd", FN_HWRD },
   { "page", FN_PAGE },   { "exp2", FN_EXP2 },   { "log2", FN_LOG2 },  { "abs", FN_ABS },
   { "int", FN_FLOAT },   { "frac", FN_FLOAT },  { "q7", FN_FLOAT },   { "q15", FN_FLOAT },
-  { "strlen", FN_LATER },
+  { "strlen", FN_STRLEN },
 };
 
 static int applyFunc(Eval *e, Func fn, const Token *name, ExprValue arg, ExprValue *out)
@@ -191,12 +191,32 @@ static int applyFunc(Eval *e, Func fn, const Token *name, ExprValue arg, ExprVal
     }
     case FN_ABS: out->value = arg.value < 0 ? (int64_t)(0 - v) : arg.value; break;
     case FN_FLOAT:
-    case FN_LATER: return fail(e, name->span, "internal error: unsupported function reached applyFunc");
+    case FN_STRLEN: return fail(e, name->span, "internal error: unsupported function reached applyFunc");
   }
   return 1;
 }
 
 // ------   primaries   ----------------------------------------------- // 
+
+// strlen("text"). the number of characters between the quotes. it has no escapes in
+// strings so strlen("a\n") is 3, a backslash gets the same warning as in .db.
+static int parseStrlen(Eval *e, ExprValue *out)
+{
+  if (!expect(e, TOK_LPAREN, "'(' after a function name")) return 0;
+  const Token *str = cursorPeek(e->cur);
+  if (str->kind != TOK_STRING) return fail(e, str->span, "strlen needs a string in quotes");
+  cursorNext(e->cur);
+  if (!expect(e, TOK_RPAREN, ")")) return 0;
+  size_t len;
+  const char *text = textOf(e, str, &len);
+  if (memchr(text, '\\', len) != NULL) {
+    diagEmit(e->env->diags, DIAG_WARNING, str->span,
+      "a backslash in a string is just a backslash: strlen counts \"\\n\" as two characters");
+  }
+  out->value = (int64_t)(len - 2);
+  out->known = 1;
+  return 1;
+}
 
 // parse an identifier primary. includes defined, pc, a function call, or a symbol
 static int parseIdent(Eval *e, ExprValue *out)
@@ -233,7 +253,7 @@ static int parseIdent(Eval *e, ExprValue *out)
     if (!nameIs(text, len, funcs[i].name)) continue;
     if (funcs[i].fn == FN_FLOAT)
       return fail(e, name->span, "%.*s works on floating-point values, which are not supported", (int)len, text);
-    if (funcs[i].fn == FN_LATER) return fail(e, name->span, "this function is not supported yet");
+    if (funcs[i].fn == FN_STRLEN) return parseStrlen(e, out);
     if (!expect(e, TOK_LPAREN, "'(' after a function name")) return 0;
     ExprValue arg;
     if (!parseTernary(e, &arg)) return 0;
@@ -266,7 +286,7 @@ static int parsePrimary(Eval *e, ExprValue *out)
       out->known = 1;
       return 1;
     case TOK_FLOAT:
-      return fail(e, t->span, "floating-point values are not supported yet");
+      return fail(e, t->span, "floating-point values are refused: avrasm2 truncates them with a warning");
     case TOK_LPAREN:
       (void)cursorNext(e->cur);
       if (!parseTernary(e, out)) return 0;

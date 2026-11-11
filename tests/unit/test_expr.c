@@ -216,6 +216,10 @@ int main(void)
 
   CHECK_STR(ev("low(0x1234)"), "52");
   CHECK_STR(ev("byte1(0x1234)"), "52");
+  CHECK_STR(ev("strlen(\"abc\")"), "3");
+  CHECK_STR(ev("strlen(\"\")"), "0");
+  CHECK_STR(ev("STRLEN(\"ab\") * 2"), "4");
+  CHECK_STR(ev("strlen(\"a\\n\")"), "3");
   CHECK_STR(ev("high(0x1234)"), "18");
   CHECK_STR(ev("byte2(0x1234)"), "18");
   CHECK_STR(ev("byte3(0x12345678)"), "52");
@@ -399,7 +403,7 @@ int main(void)
   CHECK_ERR("low(1", 5, 5);
   CHECK_ERR("low(1, 2)", 5, 6);
   CHECK_ERR("int(2)", 0, 3);
-  CHECK_ERR("strlen(\"x\")", 0, 6);
+  CHECK_ERR("strlen(5)", 7, 8);
   CHECK_ERR("q15(1)", 0, 3);
   CHECK_ERR("exp2(-1)", 0, 4);
   CHECK_ERR("\"str\"", 0, 5);
