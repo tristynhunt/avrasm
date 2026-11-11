@@ -53,7 +53,7 @@ static void runWith(Out *o, const char *src, size_t len, int allowUndefined, int
   cursorInit(&cur, &line);
 
   Table table = { 0 };
-  ExprEnv env = { &map, &diags, lookup, &table, allowUndefined, pc, NULL };
+  ExprEnv env = { &map, &diags, lookup, &table, allowUndefined, pc, NULL, 0 };
   ExprValue v = { 123, 1 };
   int ok = wide ? exprEvalWide(&cur, &env, &v) : exprEval(&cur, &env, &v);
 
@@ -358,7 +358,7 @@ int main(void)
     cursorInit(&cur, &line);
     cursorNext(&cur);
     Table table = { 0 };
-    ExprEnv env = { &map, &diags, lookup, &table, 0, 0, NULL };
+    ExprEnv env = { &map, &diags, lookup, &table, 0, 0, NULL, 0 };
     ExprValue a, b;
     CHECK(exprEval(&cur, &env, &a));
     CHECK(cursorAccept(&cur, TOK_COMMA));

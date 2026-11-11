@@ -1,4 +1,5 @@
 #include "avrasm/instr.h"
+#include "avrasm/device.h"
 #include "avrasm/diag.h"
 #include "avrasm/expr.h"
 #include "avrasm/lexer.h"
@@ -246,10 +247,18 @@ static int needValue(const Operand *op, const ExprEnv *env, int64_t lo, int64_t 
   return 1;
 }
 
+static int insideFlash(const Operand *op, const ExprEnv *env, int64_t target)
+{
+  if (env->flashWords == 0 || (target >= 0 && target < env->flashWords)) return 1;
+  diagEmit(env->diags, DIAG_ERROR, op->span, "jump target 0x%llX is outside the program memory (words 0 to 0x%X)",
+    (unsigned long long)target, (unsigned)env->flashWords - 1);
+  return 0;
+}
+
 // the distance in words from the instruction after pc to the target.
 // the variable cannot overflow and checked against lo..hi
 static int needDistance(const Operand *op, const ExprEnv *env, int64_t pc, 
-  int64_t lo, int64_t hi, const char *what, int64_t *k)
+  int64_t lo, int64_t hi, const char *what, int wraps, int64_t *k)
 {
   ExprValue v;
   if (!evalOperand(op, env, &v)) return 0;
@@ -257,8 +266,9 @@ static int needDistance(const Operand *op, const ExprEnv *env, int64_t pc,
     diagEmit(env->diags, DIAG_ERROR, op->span, "jump target is not known yet");
     return 0;
   }
+  if (!insideFlash(op, env, v.value)) return 0;
   
-  *k = (int64_t)((uint64_t)v.value - (uint64_t)(pc + 1));
+  *k = wraps ? deviceRelative(env->flashWords, pc, v.value) : (int64_t)((uint64_t)v.value - (uint64_t)(pc + 1));
   if (*k < lo || *k > hi) {
     diagEmit(env->diags, DIAG_ERROR, op->span, "%s out of range: %lld words (allowed %lld to %lld)", what,
       (long long)*k, (long long)lo, (long long)hi);
@@ -474,24 +484,24 @@ int instrEncode(const InstrDesc *d, const Operand *ops, int64_t pc, const ExprEn
     
     case FORM_BR_S: {
       int okFlag = needValue(&ops[0], env, 0, 7, "flag number", &v);
-      int okDist = needDistance(&ops[1], env, pc, -64, 63, "branch", &w);
+      int okDist = needDistance(&ops[1], env, pc, -64, 63, "branch", 0, &w);
       if (!okFlag || !okDist) return 0;
       out[0] = (uint16_t)(d->opcode | (((unsigned)w & 0x7F) << 3) | (unsigned)v);
       return 1;
     }
 
     case FORM_BR:
-      if (!needDistance(&ops[0], env, pc, -64, 63, "branch", &w)) return 0;
+      if (!needDistance(&ops[0], env, pc, -64, 63, "branch", 0, &w)) return 0;
       out[0] = (uint16_t)(d->opcode | (((unsigned)w & 0x7F) << 3));
       return 1;
 
     case FORM_REL12:
-      if (!needDistance(&ops[0], env, pc, -2048, 2047, "relative jump", &w)) return 0;
+      if (!needDistance(&ops[0], env, pc, -2048, 2047, "relative jump", 1, &w)) return 0;
       out[0] = (uint16_t)(d->opcode | ((unsigned)w & 0x0FFF));
       return 1;
 
     case FORM_ABS22:
-      if (!needValue(&ops[0], env, 0, 0x3FFFFF, "jump target", &v)) return 0;
+      if (!needValue(&ops[0], env, 0, 0x3FFFFF, "jump target", &v) || !insideFlash(&ops[0], env, v)) return 0;
       out[0] = (uint16_t)(d->opcode | (((unsigned)v >> 17) << 4) | (((unsigned)v >> 16) & 1));
       out[1] = (uint16_t)((unsigned)v & 0xFFFF);
       return 2;

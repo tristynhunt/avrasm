@@ -27,7 +27,7 @@ static void fxInit(Fx *f, const char *src)
 
 static ExprEnv envOf(Fx *f)
 {
-  ExprEnv env = { &f->map, &f->diags, symtabLookup, &f->syms, 0, 0, NULL };
+  ExprEnv env = { &f->map, &f->diags, symtabLookup, &f->syms, 0, 0, NULL, 0 };
   return env;
 }
 

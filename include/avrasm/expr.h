@@ -22,6 +22,7 @@ typedef struct ExprEnv
   // register aliases (.def). checks if 'name' is an alias and stores it in *reg if true.
   // otherwise returns 0. same rules and 'user' as lookup.
   int (*lookupRegister)(void *user, const char *name, size_t len, int *reg);
+  uint32_t flashWords;
 } ExprEnv;
 
 typedef struct ExprValue

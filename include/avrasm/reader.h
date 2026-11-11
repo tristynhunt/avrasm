@@ -30,6 +30,9 @@ typedef struct ReaderHooks
   int (*isDefined)(void *user, const char *name, size_t len);
   // checks if 'name' can be the name of a macro. reports errors itself.
   int (*nameOk)(void *user, const Token *name);
+  // a #pragma AVRPART line of a device file. 'text' is what follows AVRPART on the line
+  // ("MEMORY PROG_FLASH 32768"), 'at' its span. may be NULL.
+  void (*pragma)(void *user, Span at, const char *text, size_t len);
   void *user;
 } ReaderHooks;
 

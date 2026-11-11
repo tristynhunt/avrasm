@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "avrasm/arena.h"
@@ -397,7 +398,7 @@ static int condValue(Reader *r, TokenLine *line, uint32_t from, int pp, int64_t 
     return 0;
   }
   if (pp) {
-    ExprEnv env = { &r->ctx->sources, &r->ctx->diags, NULL, NULL, 0, 0, NULL };
+    ExprEnv env = { &r->ctx->sources, &r->ctx->diags, NULL, NULL, 0, 0, NULL, 0 };
     ExprValue v;
     if (!exprEval(&cur, &env, &v)) return 0;
     *value = v.value;
@@ -690,6 +691,60 @@ static void doUndef(Reader *r, const TokenLine *line)
   }
 }
 
+// #pragma AVRPART ...: the rest of the line goes to the assembler (the device file's sizes and core).
+static void passPragma(Reader *r, const TokenLine *line, uint32_t from)
+{
+  if (r->hooks.pragma == NULL) return;
+  uint32_t last = line->count - 1;
+  if (from >= last) {
+    r->hooks.pragma(r->hooks.user, line->tokens[last].span, "", 0);
+    return;
+  }
+  Span at = line->tokens[from].span;
+  at.end = line->tokens[last - 1].span.end;
+  r->hooks.pragma(r->hooks.user, at, sourceMapGet(&r->ctx->sources, at.file)->text + at.start, at.end - at.start);
+}
+
+// a #define written as 'spec' (NAME or NAME=value, as -D takes it), in a source of its own called 'origin'.
+static int defineFrom(Reader *r, const char *origin, const char *spec)
+{
+  const char *eq = strchr(spec, '=');
+  size_t nameLen = eq != NULL ? (size_t)(eq - spec) : strlen(spec);
+  const char *value = eq != NULL ? eq + 1 : "1";
+  size_t total = 8 + nameLen + 1 + strlen(value) + 2;
+  char *text = arenaAlloc(&r->ctx->arena, total, 1);
+  memcpy(text, "#define ", 8);
+  memcpy(text + 8, spec, nameLen);
+  text[8 + nameLen] = ' ';
+  strcpy(text + 9 + nameLen, value);
+  strcat(text, "\n");
+  FileId id = sourceMapAdd(&r->ctx->sources, origin, text, strlen(text));
+  Lexer lx;
+  lexerInit(&lx, &r->ctx->sources, id, &r->ctx->diags);
+  uint32_t errors = r->ctx->diags.errorCount;
+  TokenLine line = lexLine(&lx, &r->ctx->arena);
+  if (line.count >= 3 && line.tokens[0].kind == TOK_HASH) doDefine(r, &line);
+  else diagEmit(&r->ctx->diags, DIAG_ERROR, line.tokens[0].span, "-D needs NAME or NAME=value");
+  return r->ctx->diags.errorCount == errors;
+}
+
+// .device NAME also defines __PART_NAME__ (the name as a string: .db __PART_NAME__ gives its characters)
+// and __NAME__ (1) as AVRASM2 does. only the first .device does, another name is the assemblers error
+// and the same name again changes nothing
+static void deviceDefines(Reader *r, const TokenLine *line, uint32_t from)
+{
+  const Token *name = &line->tokens[from < line->count - 1 ? from : line->count - 1];
+  if (name->kind != TOK_IDENT || findDefine(r, "__PART_NAME__", 13) != NULL) return;
+  size_t len;
+  const char *text = tokText(r, name, &len);
+  if (len > 31) return;  // the assembler says the name is too long
+  char spec[80];
+  snprintf(spec, sizeof spec, "__PART_NAME__=\"%.*s\"", (int)len, text);
+  defineFrom(r, "<.device>", spec);
+  snprintf(spec, sizeof spec, "__%.*s__", (int)len, text);
+  defineFrom(r, "<.device>", spec);
+}
+
 // A # line. when the preprocessor is not reading ('live' is 0) only the conditionals count
 static void doPP(Reader *r, Frame *f, TokenLine *line, int live)
 {
@@ -722,7 +777,9 @@ static void doPP(Reader *r, Frame *f, TokenLine *line, int live)
     const Token *p = &line->tokens[2 < line->count ? 2 : line->count - 1];
     size_t plen = 0;
     const char *ptext = p->kind == TOK_IDENT ? tokText(r, p, &plen) : "";
-    if (!((plen == 7 && memcmp(ptext, "partinc", 7) == 0) || (plen == 7 && memcmp(ptext, "AVRPART", 7) == 0))) {
+    if (plen == 7 && memcmp(ptext, "AVRPART", 7) == 0) {
+      passPragma(r, line, 3);
+    } else if (!(plen == 7 && memcmp(ptext, "partinc", 7) == 0)) {
       diagEmit(&r->ctx->diags, DIAG_WARNING, p->span, "this #pragma is not known and is ignored");
     }
   } else {
@@ -976,7 +1033,7 @@ static int handleLine(Reader *r, Frame *f, TokenLine *line, ReaderLine *out)
     doCond(r, f, line, hi, ck, 0);
     return 0;
   }
-
+  if (head->kind == TOK_IDENT && equalsNoCase(text, len, ".device")) deviceDefines(r, line, hi + 1);
   if (head->kind == TOK_IDENT) {
     int dir = 1;
     if (equalsNoCase(text, len, ".macro")) {
@@ -1105,22 +1162,5 @@ Reader *readerCreate(AvrCtx *ctx, const ReaderHooks *hooks, FileId main,
 
 int readerDefine(Reader *r, const char *spec)
 {
-  const char *eq = strchr(spec, '=');
-  size_t nameLen = eq != NULL ? (size_t)(eq - spec) : strlen(spec);
-  const char *value = eq != NULL ? eq + 1 : "1";
-  size_t total = 8 + nameLen + 1 + strlen(value) + 2;
-  char *text = arenaAlloc(&r->ctx->arena, total, 1);
-  memcpy(text, "#define ", 8);
-  memcpy(text + 8, spec, nameLen);
-  text[8 + nameLen] = ' ';
-  strcpy(text + 9 + nameLen, value);
-  strcat(text, "\n");
-  FileId id = sourceMapAdd(&r->ctx->sources, "<command line>", text, strlen(text));
-  Lexer lx;
-  lexerInit(&lx, &r->ctx->sources, id, &r->ctx->diags);
-  uint32_t errors = r->ctx->diags.errorCount;
-  TokenLine line = lexLine(&lx, &r->ctx->arena);
-  if (line.count >= 3 && line.tokens[0].kind == TOK_HASH) doDefine(r, &line);
-  else diagEmit(&r->ctx->diags, DIAG_ERROR, line.tokens[0].span, "-D needs NAME or NAME=value");
-  return r->ctx->diags.errorCount == errors;
+  return defineFrom(r, "<command line>", spec);
 }

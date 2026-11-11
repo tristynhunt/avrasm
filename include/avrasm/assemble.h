@@ -27,9 +27,8 @@ int assembleAll(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom);
 // assembleAll with options (which can be NULL)
 int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const AsmOptions *opt);
 
-// the size of the program mem image in bytes for now.
-// this will be set later with device directives
-#define ASSEMBLE_DEFAULT_IMAGE_SIZE (1u << 17)
+// the max size of the program mem image in bytes for now.
+#define ASSEMBLE_DEFAULT_IMAGE_SIZE (1u << 18)
 #define ASSEMBLE_DEFAULT_EEPROM_SIZE (1u << 16)
 
 #endif

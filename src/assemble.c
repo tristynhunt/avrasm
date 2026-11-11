@@ -7,6 +7,7 @@
 
 #include "avrasm/arena.h"
 #include "avrasm/ctx.h"
+#include "avrasm/device.h"
 #include "avrasm/diag.h"
 #include "avrasm/expr.h"
 #include "avrasm/image.h"
@@ -97,8 +98,9 @@ typedef struct Asm
   int64_t pos[SEG_COUNT];  // pass 1: the counter of each segment
   uint32_t scope;          // the scope of the statement being handled: symbol lookups use it
   const Stmt *encoding;    // pass 2: the statement being encoded (NULL in pass 1)
-  Token device;            // .device NAME
-  int hasDevice;
+  Device device;           // what the device file and .device say
+  const Stmt *firstDevice; // the first .device: a warning if no device file comes
+  int dataMoved;           // pass 1: a .org or .byte in .dseg has moved the data counter
 } Asm;
 
 // ------- helpers -------------------------------------------------------
@@ -211,7 +213,7 @@ static int lookupRegister(void *user, const char *name, size_t len, int *reg)
 
 static ExprEnv makeEnv(Asm *a, int64_t pc)
 {
-  ExprEnv env = { &a->ctx->sources, &a->ctx->diags, lookupSymbol, a, 0, pc, lookupRegister };
+  ExprEnv env = { &a->ctx->sources, &a->ctx->diags, lookupSymbol, a, 0, pc, lookupRegister, a->device.flashBytes / 2 };
   return env;
 }
 
@@ -536,6 +538,18 @@ static int hookNameOk(void *user, const Token *name)
   return 0;
 }
 
+// a #pragma AVRPART line of a device file. until a .org or .byte has used the data space
+// .dseg starts where the devices RAM starts.
+static void hookPragma(void *user, Span at, const char *text, size_t len)
+{
+  Asm *a = user;
+  const char *why = NULL;
+  DevicePragma r = devicePragma(&a->device, text, len, &why);
+  if (r != DEVICE_PRAGMA_OK)
+    diagEmit(&a->ctx->diags, r == DEVICE_PRAGMA_ERROR ? DIAG_ERROR : DIAG_WARNING, at, "%s", why);
+  if (!a->dataMoved) a->pos[SEG_DATA] = a->device.ramStart;
+}
+
 // .set: defines the name or gives it a new vaule. returns 0 on any error.
 static int assignSymbol(Asm *a, const Token *name, int64_t value)
 {
@@ -616,11 +630,39 @@ static int removeAlias(Asm *a, const Stmt *s, int report)
 // the first pos that is past the end of the segment
 static int64_t segmentEnd(const Asm *a, Seg seg)
 {
+  const Device *d = &a->device;
   switch (seg) {
-    case SEG_CODE: return a->flash->size / 2;
-    case SEG_EEPROM: return a->eeprom->size;
-    default: return 1 << 16; // the data space default, will add device specifics later
+    case SEG_CODE: return d->flashBytes != 0 ?  d->flashBytes / 2 : a->flash->size / 2;
+    case SEG_EEPROM: return d->eepromBytes != 0 ?  d->eepromBytes : a->eeprom->size;
+    default: return d->fromFile ? (int64_t)d->ramStart + d->ramSize : 1 << 16;
   }
+}
+
+// the first position of the segment. the data space starts at the devices RAM, the others at 0.
+static int64_t segmentStart(const Asm *a, Seg seg)
+{
+  return seg == SEG_DATA && a->device.fromFile ? a->device.ramStart : 0;
+}
+
+// after a statement has moved the counter of seg to end.
+// emits one error if its past the end of the segment.
+static int fitsSegment(Asm *a, Stmt *s, Seg seg, int64_t end)
+{
+  int64_t limit = segmentEnd(a, seg);
+  if (end <= limit) return 1;
+  int64_t unit = seg == SEG_CODE ? 2 : 1;
+  const char *what = seg == SEG_CODE ? "program memory" : seg == SEG_EEPROM ? "EEPROM" : "RAM";
+  if (seg == SEG_DATA && a->device.fromFile && a->device.ramSize == 0) {
+    diagEmit(&a->ctx->diags, DIAG_ERROR, s->head.span, "the %s has no RAM", a->device.name);
+  } else if (a->device.fromFile) {
+    diagEmit(&a->ctx->diags, DIAG_ERROR, s->head.span, "this ends at 0x%llX, past the end of the %s's %s (0x%llX)",
+      (unsigned long long)(end * unit - 1), a->device.name, what, (unsigned long long)(limit * unit - 1));
+  } else {
+    diagEmit(&a->ctx->diags, DIAG_ERROR, s->head.span, "this ends at 0x%llX, past the end of the %s (0x%llX)",
+      (unsigned long long)(end * unit - 1), what, (unsigned long long)(limit * unit - 1));
+  }
+  s->bad = 1;
+  return 0;
 }
 
 // where .dseg starts when no .org says otherwise.
@@ -629,8 +671,9 @@ static int64_t segmentEnd(const Asm *a, Seg seg)
 
 static void pass1Init(Asm *a)
 {
+  deviceInit(&a->device);
   a->pos[SEG_CODE] = 0;
-  a->pos[SEG_DATA] = DATA_START;
+  a->pos[SEG_DATA] = a->device.ramStart;
   a->pos[SEG_EEPROM] = 0;
   a->cur = SEG_CODE;
 }
@@ -653,18 +696,23 @@ static void pass1Stmt(Asm *a, Stmt *s)
     case STMT_EMPTY:
       break;
     
-    case STMT_DEVICE:
-      if (a->hasDevice) {
-        size_t l1, l2;
-        const char *t1 = tokenText(a, &a->device, &l1);
-        const char *t2 = tokenText(a, &s->name, &l2);
-        if (!sameName(t1, l1, t2, l2)) {
-          diagEmit(env.diags, DIAG_WARNING, s->name.span, "the device is changed from %.*s to %.*s", (int)l1, t1, (int)l2, t2);
-        }
+    case STMT_DEVICE: {
+      size_t len;
+      const char *text = tokenText(a, &s->name, &len);
+      if (a->device.name[0] != '\0' && !sameName(a->device.name, strlen(a->device.name), text, len)) {
+        diagEmit(env.diags, DIAG_ERROR, s->name.span,
+          "the device is the %s already: .device cannot change it", a->device.name);
+        s->bad = 1;
+        break;
       }
-      a->device = s->name;
-      a->hasDevice = 1;
+      if (!deviceSetName(&a->device, text, len)) {
+        diagEmit(env.diags, DIAG_ERROR, s->name.span, "this device name is too long");
+        s->bad = 1;
+        break;
+      }
+      if (a->firstDevice == NULL) a->firstDevice = s;
       break;
+    }
 
     case STMT_DEF:
       if (!addAlias(a, s, 1)) s->bad = 1;
@@ -685,16 +733,18 @@ static void pass1Stmt(Asm *a, Stmt *s)
         break;
       }
       pos[cur] += s->instr->words;
+      fitsSegment(a, s, cur, pos[cur]);
       break;
 
     case STMT_ORG:
       if (!evalOperand(&s->ops[0], &env, &v)) break;
-      if (v.value < 0 || v.value > segmentEnd(a, cur)) {
-        diagEmit(env.diags, DIAG_ERROR, s->ops[0].span, 
-          ".org address %lld is outside the segment (0 to %lld)", (long long)v.value, (long long)segmentEnd(a, cur));
+      if (v.value < segmentStart(a, cur) || v.value > segmentEnd(a, cur)) {
+        diagEmit(env.diags, DIAG_ERROR, s->ops[0].span, ".org address %lld is outside the segment (%lld to %lld)",
+          (long long)v.value, (long long)segmentStart(a, cur), (long long)segmentEnd(a, cur));
         break;
       }
       pos[cur] = v.value;
+      if (cur == SEG_DATA) a->dataMoved = 1;
       break;
 
     case STMT_EQU:
@@ -724,6 +774,7 @@ static void pass1Stmt(Asm *a, Stmt *s)
       } else {
         pos[cur] += s->dataBytes;
       }
+      fitsSegment(a, s, cur, pos[cur]);
       break;
 
     case STMT_BYTE:
@@ -737,6 +788,8 @@ static void pass1Stmt(Asm *a, Stmt *s)
         break;
       }
       pos[cur] += v.value;
+      if (cur == SEG_DATA) a->dataMoved = 1;
+      fitsSegment(a, s, cur, pos[cur]);
       break;
   }
 }
@@ -852,6 +905,12 @@ static void pass2(Asm *a)
       case STMT_INSTR: {
         uint16_t words[2];
         int n = instrEncode(s->instr, s->ops, s->pc, &env, words);
+        if (n > 0 && !deviceHas(&a->device, deviceGroup(words[0]))) {
+          // unsupported instruction
+          diagEmit(&a->ctx->diags, DIAG_ERROR, s->head.span,
+            "%s is not available on the %s", s->instr->name, a->device.name);
+          break;
+        }
         uint8_t bytes[4];
         for (int i = 0; i < n; i++) {
           bytes[2 * i] = (uint8_t)(words[i] & 0xFF);
@@ -884,7 +943,7 @@ int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const Asm
   a.eeprom = eeprom;
   symtabInit(&a.syms, &ctx->arena, 0);
 
-  ReaderHooks hooks = { hookEval, hookIsDefined, hookNameOk, &a };
+  ReaderHooks hooks = { hookEval, hookIsDefined, hookNameOk, hookPragma, &a };
   a.reader = readerCreate(ctx, &hooks, file, opt != NULL ? opt->includeDirs : NULL, opt != NULL ? opt->includeDirCount : 0);
   if (opt != NULL) {
     for (uint32_t i = 0; i < opt->defineCount; i++) readerDefine(a.reader, opt->defines[i]);
@@ -902,6 +961,11 @@ int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const Asm
     noteCallSite(&a, rl.callSite, before);
   }
   a.scope = 0;
+  if (a.firstDevice != NULL && !a.device.fromFile) {
+    diagEmit(&ctx->diags, DIAG_WARNING, a.firstDevice->name.span,
+      "no device file is included, so the memory sizes and instructions of the %s are not checked "
+      "(include its file, e.g. .include \"m324Adef.inc\")", a.device.name);
+  }
 
   pass2(&a);
   return !diagListHasErrors(&ctx->diags);

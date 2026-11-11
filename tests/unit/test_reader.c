@@ -70,7 +70,7 @@ static const char *lines(const char *main, const char *const *defs, uint32_t def
   theCtx = &ctx;
   ctxInit(&ctx, (AvrVfs){readFile, NULL});
   FileId id = sourceMapAdd(&ctx.sources, "main.asm", main, strlen(main));
-  ReaderHooks hooks = {hookEval, hookIsDefined, hookNameOk, NULL};
+  ReaderHooks hooks = {hookEval, hookIsDefined, hookNameOk, NULL, NULL};
   const char *dirs[] = {"dirs"};
   Reader *r = readerCreate(&ctx, &hooks, id, dirs, 1);
   for (uint32_t i = 0; i < defCount; i++) readerDefine(r, defs[i]);

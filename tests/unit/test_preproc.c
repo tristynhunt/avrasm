@@ -213,7 +213,7 @@ static const Row rows[] = {
   {1503, ".device ATmega99\nnop\n", T_GOOD, "000000: 00 00\n", NULL, NULL},
   {1504, ".device\nnop\n", T_BAD, "", NULL, NULL},
   {1505, ".device ATmega324A\n.device ATmega324A\nnop\n", T_GOOD, "000000: 00 00\n", NULL, NULL},
-  {1506, ".device ATmega324A\n.device ATmega328P\nnop\n", T_GOOD, "000000: 00 00\n", NULL, NULL},
+  {1506, ".device ATmega324A\n.device ATmega328P\nnop\n", T_STRICT, "", NULL, NULL},
   {1507, "nop\n.device ATmega324A\nnop\n", T_GOOD, "000000: 00 00 00 00\n", NULL, NULL},
   {1508, ".device ATmega324A\n.dseg\n.device ATmega324A\nnop\n", T_BAD, "", NULL, NULL},
   {1509, ".dseg\nv: .byte 1\n.cseg\nldi r16, low(v)\nldi r17, high(v)\n", T_GOOD, "000000: 00 e6 10 e0\n", NULL, NULL},

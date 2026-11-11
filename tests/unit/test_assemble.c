@@ -80,11 +80,11 @@ int main(void)
   good(".org 4\nl: rjmp l\n", "000008: ff cf\n");
   good(".equ base = 8\n.org base * 2\nnop\n", "000020: 00 00\n");
   good("nop\n.org pc + 2\nnop\n", "000000: 00 00\n000006: 00 00\n");
-  good(".org 0x10000\n", "");
-  bad(".org 0x10001\n", 1, 5);
+  good(".org 0x20000\n", "");
+  bad(".org 0x20001\n", 1, 5);
   bad(".org -1\n", 1, 5);
   bad(".org nosuch\n", 1, 5);
-  bad(".org 0x10000\nnop\n", 1, 13);
+  bad(".org 0x20000\nnop\n", 1, 13);
   bad(".org\n", 1, 4);
   bad(".org 1, 2\n", 1, 8);
 

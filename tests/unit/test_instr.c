@@ -19,7 +19,7 @@ static void fxInit(Fx *f)
   sourceMapInit(&f->map, &f->arena);
   diagListInit(&f->diags, &f->arena);
   symtabInit(&f->syms, &f->arena, 0);
-  ExprEnv env = { &f->map, &f->diags, symtabLookup, &f->syms, 0, 0, NULL };
+  ExprEnv env = { &f->map, &f->diags, symtabLookup, &f->syms, 0, 0, NULL, 0 };
   f->env = env;
 }
 
