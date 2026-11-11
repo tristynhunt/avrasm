@@ -3,13 +3,35 @@
 
 #include <stdint.h>
 #include <stdio.h>
-
+#include <string.h>
 
 void imageInit(Image *im, Arena *arena, uint32_t size)
 {
+  im->arena = arena;
   im->size = size;
   im->bytes = arenaAlloc(arena, size > 0 ? size : 1, 1);
   im->used  = arenaAlloc(arena, size > 0 ? size : 1, 1);
+  im->blocks = NULL;
+  im->blockCount = 0;
+  im->blockCap = 0;
+}
+
+// byte addr was just written, extend the last block or start a new one.
+static void noteBlock(Image *im, uint32_t addr)
+{
+  if (im->blockCount > 0 && im->blocks[im->blockCount - 1].end == addr) {
+    im->blocks[im->blockCount - 1].end++;
+    return;
+  }
+
+  if (im->blockCount == im->blockCap) {
+    uint32_t cap = im->blockCap > 0 ? im->blockCap * 2 : 16;
+    ImageBlock *grown = arenaAlloc(im->arena, cap * sizeof *grown, _Alignof(ImageBlock));
+    if (im->blockCount > 0) memcpy(grown, im->blocks, im->blockCount * sizeof *grown);
+    im->blocks = grown;
+    im->blockCap = cap;
+  }
+  im->blocks[im->blockCount++] = (ImageBlock){ addr, addr + 1 };
 }
 
 ImageStatus imageWriteByte(Image *im, uint32_t addr, uint8_t value)
@@ -18,6 +40,7 @@ ImageStatus imageWriteByte(Image *im, uint32_t addr, uint8_t value)
   ImageStatus status = im->used[addr] ? IMAGE_OVERLAP : IMAGE_OK;
   im->bytes[addr] = value;
   im->used[addr] = 1;
+  noteBlock(im, addr);
   return status;
 }
 

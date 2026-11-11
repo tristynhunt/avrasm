@@ -5,6 +5,14 @@
 
 #include "avrasm/arena.h"
 
+// a run of bytes that were written one after the other, [start, end). avrasm2 writes its hex records
+// block by block in the order the program wrote them and not sorted by address
+typedef struct ImageBlock
+{
+  uint32_t start;
+  uint32_t end;
+} ImageBlock;
+
 // a memory image. 'size' bytes big, each either written or not. bytes which
 // are not written are not part of the output at all.
 typedef struct Image
@@ -12,6 +20,10 @@ typedef struct Image
   uint8_t *bytes;
   uint8_t *used;  // used[i] is 1, once byte i has been written
   uint32_t size;
+  Arena *arena;   // where the block list grows
+  ImageBlock *blocks;   // in the order they were written, a write right after the last block extends it
+  uint32_t blockCount;
+  uint32_t blockCap;
 } Image;
 
 typedef enum ImageStatus

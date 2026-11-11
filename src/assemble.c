@@ -101,6 +101,7 @@ typedef struct Asm
   Device device;           // what the device file and .device say
   const Stmt *firstDevice; // the first .device: a warning if no device file comes
   int dataMoved;           // pass 1: a .org or .byte in .dseg has moved the data counter
+  int64_t dataReserved;    // pass 1: the bytes .byte reserved in .dseg; pass1Stmt
 } Asm;
 
 // ------- helpers -------------------------------------------------------
@@ -788,7 +789,10 @@ static void pass1Stmt(Asm *a, Stmt *s)
         break;
       }
       pos[cur] += v.value;
-      if (cur == SEG_DATA) a->dataMoved = 1;
+      if (cur == SEG_DATA) {
+        a->dataMoved = 1;
+        a->dataReserved += v.value;
+      }
       fitsSegment(a, s, cur, pos[cur]);
       break;
   }
@@ -968,7 +972,9 @@ int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const Asm
   }
 
   pass2(&a);
-  return !diagListHasErrors(&ctx->diags);
+  if (diagListHasErrors(&ctx->diags)) return 0;
+  if (flash->blockCount == 0 && eeprom->blockCount == 0 && a.dataReserved == 0) return ASSEMBLE_EMPTY;
+  return 1;
 }
 
 int assembleAll(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom)

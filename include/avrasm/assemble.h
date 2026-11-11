@@ -22,11 +22,14 @@ int assemble(AvrCtx *ctx, FileId file, Image *image);
 
 // the same, and the EEPROM image (what .eseg builds) goes to 'eeprom'.
 // assemble() is this with an image it throws away.
+// returns 0 after an error, 1 when the program assembled, and ASSEMBLE_EMPTY when it assembled
+// but put nothing anywhere: no code, no EEPROM data, no .byte in .dseg.
 int assembleAll(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom);
 
 // assembleAll with options (which can be NULL)
 int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const AsmOptions *opt);
 
+#define ASSEMBLE_EMPTY 2
 // the max size of the program mem image in bytes for now.
 #define ASSEMBLE_DEFAULT_IMAGE_SIZE (1u << 18)
 #define ASSEMBLE_DEFAULT_EEPROM_SIZE (1u << 16)

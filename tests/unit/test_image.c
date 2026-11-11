@@ -86,7 +86,28 @@ int main(void)
   CHECK_INT(strlen(t), 100 * 11);
   CHECK(strncmp(t, "000000: ab\n000002: ab\n", 22) == 0);
   arenaFree(&tight);
-
   arenaFree(&arena);
+  
+  {
+    Arena blockArena;
+    arenaInit(&blockArena, 0);
+    Image b;
+    imageInit(&b, &blockArena, 0x100);
+    CHECK_INT(b.blockCount, 0);
+    imageWriteWord(&b, 0x20, 0x0000);
+    imageWriteWord(&b, 0x22, 0x1111);
+    imageWriteWord(&b, 0x00, 0x2222);
+    CHECK_INT(b.blockCount, 2);
+    CHECK_INT(b.blocks[0].start, 0x20);
+    CHECK_INT(b.blocks[0].end, 0x24);
+    CHECK_INT(b.blocks[1].start, 0x00);
+    CHECK_INT(b.blocks[1].end, 0x02);
+    for (uint32_t i = 0; i < 40; i++) imageWriteByte(&b, 0x40 + 2 * i, 0);
+    CHECK_INT(b.blockCount, 42);
+    CHECK_INT(imageWriteByte(&b, 0x100, 0), IMAGE_RANGE);
+    CHECK_INT(b.blockCount, 42);
+    arenaFree(&blockArena);
+  }
+
   return TEST_RESULT();
 }
