@@ -40,6 +40,12 @@ static const Good goods[] = {
     "000000: 41 42\n", "", 0 },
   { ".db \"A\\n\"\n",
     "000000: 41 5c 6e 00\n", "", 2 },
+  { ".db \"\\_/a\\b \\\\\", 0\n",
+    "000000: 5c 5f 2f 61 5c 62 20 5c 5c 00\n", "", 1 },
+  { ".db \"C:\\temp\\x41\\0\"\n",
+    "000000: 43 3a 5c 74 65 6d 70 5c 78 34 31 5c 30 00\n", "", 4 },
+  { ".db \"ab\\\", \"c\\'d\"\n",
+    "000000: 61 62 5c 63 5c 27 64 00\n", "", 3 },
   { ".db \"ab\", 0\n",
     "000000: 61 62 00 00\n", "", 1 },
   { ".db 'a', 'b'\n",
@@ -179,6 +185,23 @@ static const Bad bads[] = {
   { ".def a = r16\nldi r17, a\n", 1, 22 },
 };
 
+static void testEscapeSpans(void)
+{
+  Run r;
+  run(&r, ".db \"ab\\ncd\\x7Fz\", 0\n");
+  const Diag *d = r.ctx.diags.head;
+  CHECK(d != NULL && d->next != NULL && d->next->next == NULL);
+  if (d != NULL && d->next != NULL) {
+    CHECK_INT(d->span.start, 7);
+    CHECK_INT(d->span.end, 9);
+    CHECK(strstr(d->message, "not a line feed") != NULL);
+    CHECK_INT(d->next->span.start, 11);
+    CHECK_INT(d->next->span.end, 15);
+    CHECK(strstr(d->next->message, "\\x7F is 4 bytes, not the byte 0x7F") != NULL);
+  }
+  ctxFree(&r.ctx);
+}
+
 int main(void)
 {
   for (size_t i = 0; i < sizeof goods / sizeof goods[0]; i++) {
@@ -223,6 +246,8 @@ int main(void)
     CHECK(strcmp(r.eepromText, "") == 0);
     ctxFree(&r.ctx);
   }
+
+  testEscapeSpans();
 
   return TEST_RESULT();
 }

@@ -259,6 +259,55 @@ static const char *dataName(StmtKind kind)
   return kind == STMT_DB ? ".db" : kind == STMT_DW ? ".dw" : kind == STMT_DD ? ".dd" : ".dq";
 }
 
+static int isHexDigit(char c)
+{
+  return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+static void warnEscapes(Asm *a, const Token *str)
+{
+  static const struct {
+    char c;
+    const char *meant;    // what the escape would be
+    const char *instead;  // what to put after the string for it
+  } escapes[] = {
+    { 'n', "a line feed", "10" }, { 'r', "a carriage return", "13" }, { 't', "a tab", "9" }, { '0', "a zero byte", "0" },
+  };
+
+  size_t n;
+  const char *text = tokenText(a, str, &n);  // with its quotes
+  for (size_t i = 1; i + 1 < n; i++) {
+    if (text[i] != '\\') continue;
+    char c = text[i + 1];
+    Span at = { str->span.file, str->span.start + (uint32_t)i, str->span.start + (uint32_t)i + 2 };
+    if (c == '\\') {
+      diagEmit(&a->ctx->diags, DIAG_WARNING, at, 
+        "in a string, \\\\ is two backslashes, not one: there are no escapes in strings so one \\ is enough");
+      i++;
+    } else if (c == '"') {
+      diagEmit(&a->ctx->diags, DIAG_WARNING, at, "a backslash does not escape the quote after it: "
+        "the string ends there (for a quote, put 34 after the string)");
+    } else if (c == '\'') {
+      diagEmit(&a->ctx->diags, DIAG_WARNING, at, 
+        "in a string, \\' is a backslash and a quote: a ' needs no backslash there");
+    } else if (c == 'x' && i + 2 < n && isHexDigit(text[i + 2])) {
+      at.end += isHexDigit(text[i + 3]) && i + 3 < n - 1 ? 2 : 1;
+      int digits = (int)(at.end - at.start) - 2;
+      diagEmit(&a->ctx->diags, DIAG_WARNING, at, 
+        "in a string, \\x%.*s is %d bytes, not the byte 0x%.*s: "
+        "there are no escapes in strings (put 0x%.*s after the string)", 
+        digits, text + i + 2, digits + 2, digits, text + i + 2, digits, text + i + 2);
+    } else {
+      for (size_t k = 0; k < sizeof escapes / sizeof escapes[0]; k++) {
+        if (escapes[k].c != c) continue;
+        diagEmit(&a->ctx->diags, DIAG_WARNING, at, "in a string, \\%c is the two bytes '\\' and '%c', not %s: "
+          "there are no escapes in strings (for %s, put %s after the string)",
+          c, c, escapes[k].meant, escapes[k].meant, escapes[k].instead);
+      }
+    }
+  }
+}
+
 // .db and .dw: a comma-separated list of values. 'unit' is the size of one value in bytes.
 // fills s->itemCount and s->dataBytes, a string is its length in bytes.
 static void parseData(Asm *a, const TokenLine *line, uint32_t from, Stmt *s, const char *directive, uint32_t unit)
@@ -288,12 +337,7 @@ static void parseData(Asm *a, const TokenLine *line, uint32_t from, Stmt *s, con
         s->bad = 1;
         return;
       }
-      size_t n;
-      const char *str = tokenText(a, &item->tokens.tokens[0], &n);
-      if (memchr(str, '\\', n) != NULL) {
-        diagEmit(diags, DIAG_WARNING, item->span, 
-          "a backslash in a string is just a backslash: \"\\n\" is the two bytes '\\' and 'n' (for a line feed, write 10)");
-      }
+      warnEscapes(a, &item->tokens.tokens[0]);
       s->dataBytes += chars;
     } else {
       diagEmit(diags, DIAG_ERROR, item->span, "a string can only be used with .db");
