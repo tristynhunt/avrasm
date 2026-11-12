@@ -1,3 +1,4 @@
+#include "avrasm/lint.h"
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
@@ -15,7 +16,7 @@
 #include "avrasm/report.h"
 #include "avrasm/source.h"
 
-#define AVRASM_VERSION "1.0"
+#define AVRASM_VERSION "1.1"
 
 static void usage(FILE *out)
 {
@@ -28,6 +29,7 @@ static void usage(FILE *out)
     "  -D name[=value]  define a preprocessor name, like #define (value 1 if left out); repeatable\n"
     "  --image          print the program memory image to stdout (the form the tests compare); with it,\n"
     "                   a .hex file is only written when -o asks for one\n"
+    "  --no-lint        leave out the warnings about code that assembles but is probably wrong\n"
     "  -h, --help       this text\n"
     "  --version        the version\n"
     "\n"
@@ -86,6 +88,7 @@ int main(int argc, char **argv)
   _setmode(_fileno(stdout), _O_BINARY);
 #endif
   int showImage = 0;
+  int lint = 1;
   const char *path = NULL;
   const char *flashPath = NULL;
   const char *eepromPath = NULL;
@@ -103,6 +106,8 @@ int main(int argc, char **argv)
     } else if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
       puts("avrasm " AVRASM_VERSION);
       return 0;
+    } else if (strcmp(arg, "--no-lint") == 0) {
+      lint = 0;
     } else if (arg[0] == '-' && (arg[1] == 'I' || arg[1] == 'D' || arg[1] == 'o' || arg[1] == 'e' || arg[1] == 'f')) {
       char which = arg[1];
       const char *value = optionValue(argc, argv, &i);
@@ -159,8 +164,11 @@ int main(int argc, char **argv)
   Span nowhere = { FILE_NONE, 0, 0 };
   FileId file = ctxLoad(&ctx, path, nowhere);
   if (file != FILE_NONE) {
-    AsmOptions opt = { dirs, dirCount, defines, defineCount, NULL };
+    Outline outline;
+    outlineInit(&outline, &ctx.arena);
+    AsmOptions opt = { dirs, dirCount, defines, defineCount, &outline };
     result = assembleOpt(&ctx, file, &flash, &eeprom, &opt);
+    if (result == 1 && lint) lintProgram(&ctx.diags, &outline, &flash);
   }
   reportDiags(stderr, &ctx.sources, &ctx.diags);
 

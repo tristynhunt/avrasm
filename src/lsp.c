@@ -5,6 +5,7 @@
 #include "avrasm/image.h"
 #include "avrasm/instr.h"
 #include "avrasm/json.h"
+#include "avrasm/lint.h"
 #include "avrasm/outline.h"
 #include "avrasm/source.h"
 
@@ -365,7 +366,9 @@ static Analysis *analyse(LspServer *s, const Doc *d)
   outlineInit(&an->outline, &an->ctx.arena);
   AsmOptions opt = { (const char *const *)s->includeDirs, s->includeCount, 
     (const char *const *)s->defines, s->defineCount, &an->outline };
-  assembleOpt(&an->ctx, id, &an->flash, &an->eeprom, &opt);
+  if (id != FILE_NONE && assembleOpt(&an->ctx, id, &an->flash, &an->eeprom, &opt) == 1) {
+    lintProgram(&an->ctx.diags, &an->outline, &an->flash);
+  }
   return an;
 }
 

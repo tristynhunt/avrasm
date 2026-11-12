@@ -189,7 +189,7 @@ static void testDiagnostics(void)
   CHECK(strstr(jsonString(jsonGet(d->first, "message")), "nosuch") != NULL);
   checkRange(d->first, 1, 9, 15);
   forget();
-  sendText(s, "textDocument/didChange", uri, "nop\nldi r16, 1\n");
+  sendText(s, "textDocument/didChange", uri, "nop\nldi r16, 1\nrjmp 0\n");
   CHECK(published(uri) != NULL && count(published(uri)) == 0);
 
   sendText(s, "textDocument/didChange", uri, ".db \"\xC3\xA9\xF0\x9F\x98\x80\", nosuch\n");
@@ -280,7 +280,7 @@ static void testSettings(void)
 {
   const char *uri = "file:///p/main.asm";
   LspServer *s = start("{\"rootUri\":\"file:///p\",\"initializationOptions\":{\"includePaths\":[\"inc\"],\"defines\":[\"FAST\"]}}");
-  sendText(s, "textDocument/didOpen", uri, ".include \"consts.inc\"\n#ifdef FAST\nldi r16, LIMIT\n#else\nnosuch\n#endif\n");
+  sendText(s, "textDocument/didOpen", uri, ".include \"consts.inc\"\n#ifdef FAST\nldi r16, LIMIT\n#else\nnosuch\n#endif\nrjmp 0\n");
   CHECK_INT(count(published(uri)), 0);
   forget();
   handle(s, "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeConfiguration\",\"params\":{\"settings\":{\"avrasm\":{\"defines\":[]}}}}");
