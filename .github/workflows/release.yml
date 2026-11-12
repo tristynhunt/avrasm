@@ -1,0 +1,37 @@
+# On a version tag (git tag v1.0.0 && git push --tags): builds avrasm and avrasm-lsp for every system
+# with Zig (make dist) and attaches them to a GitHub Release, one archive per system.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.1
+      - run: make test
+      - run: make dist DIST_DIR=dist
+      - name: Archives
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          cd dist
+          for d in */; do
+            name="${d%/}"
+            if [[ "$name" == win32-* ]]; then
+              zip -j "../avrasm-$v-$name.zip" "$name"/*
+            else
+              tar -czf "../avrasm-$v-$name.tar.gz" -C "$name" .
+            fi
+          done
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" avrasm-*.zip avrasm-*.tar.gz --title "avrasm ${GITHUB_REF_NAME#v}" --generate-notes
