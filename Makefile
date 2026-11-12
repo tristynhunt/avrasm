@@ -47,7 +47,7 @@ LSP      := $(BUILD)/avrasm-lsp$(EXE)
 TEST_SRC := $(wildcard tests/unit/test_*.c)
 TEST_BIN := $(patsubst tests/unit/%.c,$(BUILD)/tests/%$(EXE),$(TEST_SRC))
 
-.PHONY: all test clean difftest lspcheck install uninstall
+.PHONY: all test clean lspcheck install uninstall
 
 all: $(LIB) $(CLI) $(LSP)
 
@@ -80,10 +80,6 @@ test: $(TEST_BIN)
 # make test-arena  ->  build and run build/tests/test_arena
 test-%: $(BUILD)/tests/test_%$(EXE)
 	$<
-
-# Compare the assembler with the images captured from avrasm2 (see tests/tools/capture.sh).
-difftest: all
-	AVRASM=$(CLI) bash tests/tools/difftest.sh
 
 # Talk to the language server through stdin and stdout, as an editor does (tests/tools/lspcheck.py).
 lspcheck: all

@@ -16,7 +16,7 @@
 #include "avrasm/report.h"
 #include "avrasm/source.h"
 
-#define AVRASM_VERSION "1.1"
+#define AVRASM_VERSION "1.0.0"
 
 static void usage(FILE *out)
 {
