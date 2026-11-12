@@ -8,6 +8,8 @@
 #   make CC="zig cc"   any C11 compiler works
 #   make install       copy build/avrasm and build/avrasm-lsp to $(PREFIX)/bin (PREFIX=/usr/local.
 #                      DESTDIR is put in front, for packaging). make uninstall takes them away
+#   make dist          build both programs for every system the VS Code extension runs on with Zig into
+#                      editors/vscode/bin/<system>/. make bundle puts just this systems there
 #   make clean
 #
 # Linux: gcc or clang. macOS: the Xcode command line tools (xcode-select --install). Windows: MSYS2s
@@ -47,7 +49,7 @@ LSP      := $(BUILD)/avrasm-lsp$(EXE)
 TEST_SRC := $(wildcard tests/unit/test_*.c)
 TEST_BIN := $(patsubst tests/unit/%.c,$(BUILD)/tests/%$(EXE),$(TEST_SRC))
 
-.PHONY: all test clean lspcheck install uninstall
+.PHONY: all test clean lspcheck install uninstall dist bundle
 
 all: $(LIB) $(CLI) $(LSP)
 
@@ -91,6 +93,31 @@ install: all
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/avrasm$(EXE)" "$(DESTDIR)$(BINDIR)/avrasm-lsp$(EXE)"
+
+DIST_DIR ?= editors/vscode/bin
+DIST     := linux-x64:x86_64-linux-musl linux-arm64:aarch64-linux-musl darwin-x64:x86_64-macos \
+            darwin-arm64:aarch64-macos win32-x64:x86_64-windows-gnu win32-arm64:aarch64-windows-gnu
+
+dist:
+	@for d in $(DIST); do \
+	  name=$${d%%:*}; target=$${d#*:}; exe=; \
+	  case $$name in win32-*) exe=.exe;; esac; \
+	  echo "== $$name ($$target)"; \
+	  $(MAKE) --no-print-directory BUILD=$(BUILD)/dist/$$name CC="zig cc -target $$target" AR="zig ar" \
+	    EXE=$$exe SAN=0 LDFLAGS=-s all || exit 1; \
+	  mkdir -p $(DIST_DIR)/$$name; \
+	  cp $(BUILD)/dist/$$name/avrasm$$exe $(BUILD)/dist/$$name/avrasm-lsp$$exe $(DIST_DIR)/$$name/ || exit 1; \
+	done
+
+# only this systems programs from the ordinary build
+HOST_OS   := $(shell uname -s 2>/dev/null)
+HOST_ARCH := $(shell uname -m 2>/dev/null)
+NODE_OS   := $(if $(filter Linux,$(HOST_OS)),linux,$(if $(filter Darwin,$(HOST_OS)),darwin,win32))
+NODE_ARCH := $(if $(filter x86_64 amd64,$(HOST_ARCH)),x64,$(if $(filter aarch64 arm64,$(HOST_ARCH)),arm64,$(HOST_ARCH)))
+
+bundle: all
+	mkdir -p $(DIST_DIR)/$(NODE_OS)-$(NODE_ARCH)
+	cp $(CLI) $(LSP) $(DIST_DIR)/$(NODE_OS)-$(NODE_ARCH)/
 
 clean:
 	rm -rf $(BUILD)
