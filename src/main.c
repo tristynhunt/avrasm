@@ -1,3 +1,8 @@
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,6 +49,8 @@ static const char *optionValue(int argc, char **argv, int *i)
 static char *defaultHexName(const char *path)
 {
   const char *slash = strrchr(path, '/');
+  const char *back = strrchr(path, '\\');  // windows paths
+  if (back != NULL && (slash == NULL || back > slash)) slash = back;
   const char *dot = strrchr(path, '.');
   size_t stem = (dot != NULL && (slash == NULL || dot > slash)) ? (size_t)(dot - path) : strlen(path);
   char *name = malloc(stem + 5);
@@ -74,6 +81,10 @@ static int writeText(const char *path, const char *text)
 
 int main(int argc, char **argv)
 {
+#ifdef _WIN32
+  // --image writes "\n" not "\r\n"
+  _setmode(_fileno(stdout), _O_BINARY);
+#endif
   int showImage = 0;
   const char *path = NULL;
   const char *flashPath = NULL;

@@ -15,6 +15,8 @@ static const Entry files[] = {
     {"x.inc", "inc1\ninc2\n"},
     {"inc/y.inc", "from_y\n.exit\nnever\n"},
     {"dirs/z.inc", "from_z\n"},
+    {"/abs/w.inc", "from_w\n"},
+    {"C:/abs/v.inc", "from_v\n"},
     {NULL, NULL},
 };
 
@@ -109,6 +111,9 @@ int main(void)
   CHECK_STR(lines(".include \"z.inc\"\n", NULL, 0), "from_z");
   CHECK_STR(lines(".include <z.inc>\n", NULL, 0), "from_z");
   CHECK_STR(lines(".include <x.inc>\n", NULL, 0), "ERR 1");
+  CHECK_STR(lines(".include \"/abs/w.inc\"\n", NULL, 0), "from_w");
+  CHECK_STR(lines(".include \"C:\\abs\\v.inc\"\n", NULL, 0), "from_v");
+  CHECK_STR(lines(".include \"/x.inc\"\n", NULL, 0), "ERR 1");
   CHECK_STR(lines(".include \"nofile.inc\"\n", NULL, 0), "ERR 1");
   CHECK_STR(lines(".include \"inc/y.inc\"\nafter\n", NULL, 0), "from_y | after");
 

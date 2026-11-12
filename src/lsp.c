@@ -129,16 +129,36 @@ static void listFree(char **list, uint32_t count)
 
 // ---- paths and URIs ----
 
+// does the path start with a windows drive "C:"
+static int hasDrive(const char *path)
+{
+  char c = (char)(path[0] | 0x20);
+  return c >= 'a' && c <= 'z' && path[1] == ':';
+}
+
+// "/usr/..." or "C:/..." (or "C:\\...").
+static int isAbsolutePath(const char *path)
+{
+  return path[0] == '/' || path[0] == '\\' || (hasDrive(path) && (path[2] == '/' || path[2] == '\\'));
+}
+
 // the path with its "." and ".." parts and doubled slashes taken out without looking at the disk
 // (as the file may not exist yet and links are not followed). "/a/./b//../c" is "/a/c".
-static char *normalPath(const char *path)
+static char *normalPath(const char *raw)
 {
-  size_t n = strlen(path);
+  size_t n = strlen(raw);
+  char *path = xmalloc(n + 1);
+  for (size_t i = 0; i <= n; i++) path[i] = raw[i] == '\\' ? '/' : raw[i];
   char *out = xmalloc(n + 2);
   size_t len = 0;
   size_t floor = 0;
-  if (path[0] == '/') out[len++] = '/', floor = 1;
-  const char *p = path;
+  if (hasDrive(path)) {
+    out[len++] = (char)(path[0] | 0x20);
+    out[len++] = ':';
+    floor = len;
+  }
+  if (path[len] == '/') out[len++] = '/', floor = len;
+  const char *p = path + len;
   while(1) {
     while (*p == '/') p++;
     if (*p == '\0') break;
@@ -161,6 +181,7 @@ static char *normalPath(const char *path)
   }
   if (len == 0) out[len++] = '.';
   out[len] = '\0';
+  free(path);
   return out;
 }
 
@@ -189,7 +210,8 @@ static char *uriToPath(const char *uri)
     }
   }
   path[n] = '\0';
-  char *normal = normalPath(path);
+  // file:///c%3A/Users/... is the windows path c:/Users/... no '/' before the drive
+  char *normal = normalPath(path[0] == '/' && hasDrive(path + 1) ? path + 1 : path);
   free(path);
   return normal;
 }
@@ -199,10 +221,11 @@ static char *uriToPath(const char *uri)
 static char *pathToUri(const char *path)
 {
   size_t n = strlen(path);
-  char *uri = xmalloc(7 + 3 * n + 1);
+  char *uri = xmalloc(8 + 3 * n + 1);
   size_t len = 0;
   memcpy(uri, "file://", 7);
   len = 7;
+  if (hasDrive(path)) uri[len++] = '/';
   for (size_t i = 0; i < n; i++) {
     unsigned char c = (unsigned char)path[i];
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr("-._~/", c) != NULL) {
@@ -493,7 +516,7 @@ static void setList(LspServer *s, char **list, uint32_t *count, const Json *arra
   for (const Json *v = array->first; v != NULL && *count < LSP_MAX_SETTINGS; v = v->next) {
     const char *text = jsonString(v);
     if (text == NULL || text[0] == '\0') continue;
-    if (isPath && text[0] != '/' && s->rootPath != NULL) {
+    if (isPath && !isAbsolutePath(text) && s->rootPath != NULL) {
       size_t n = strlen(s->rootPath) + 1 + strlen(text) + 1;
       char *joined = xmalloc(n);
       snprintf(joined, n, "%s/%s", s->rootPath, text);

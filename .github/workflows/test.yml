@@ -1,0 +1,34 @@
+# Builds avrasm and runs every test on Linux, macOS and Windows, on each push and pull request.
+# (difftest needs the Microchip device files, which are not in the repository, so it runs at home.)
+name: test
+
+on: [push, pull_request]
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: make
+      - run: make test
+      - run: make lspcheck
+      - run: make clean && make SAN=1 test
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-python
+      - run: make
+      - run: make test
+      - run: make lspcheck

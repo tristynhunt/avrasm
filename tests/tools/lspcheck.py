@@ -7,11 +7,12 @@ and checks the diagnostics, hover, go to definition, document symbols and comple
 Prints one line per check and exits 1 if any failed."""
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
 
-SERVER = sys.argv[1] if len(sys.argv) > 1 else "build/avrasm-lsp"
+SERVER = sys.argv[1] if len(sys.argv) > 1 else "build/avrasm-lsp" + (".exe" if os.name == "nt" else "")
 failures = 0
 
 
@@ -75,9 +76,9 @@ with tempfile.TemporaryDirectory() as tmp:
             ".include \"lib.inc\"\n")
     with open(main, "w") as f:
         f.write(text)
-    uri = "file://" + main
+    uri = pathlib.Path(main).as_uri()
     c = Client([SERVER])
-    init = c.request("initialize", {"processId": None, "rootUri": "file://" + tmp, "capabilities": {}})
+    init = c.request("initialize", {"processId": None, "rootUri": pathlib.Path(tmp).as_uri(), "capabilities": {}})
     check("initialize: the server says it can hover", init["result"]["capabilities"].get("hoverProvider") is True, init)
     c.notify("initialized", {})
     c.notify("textDocument/didOpen", {"textDocument": {"uri": uri, "languageId": "avr", "version": 1, "text": text}})
@@ -107,10 +108,10 @@ with tempfile.TemporaryDirectory() as tmp:
     labels = {i["label"] for i in comp["result"]}
     check("completion offers ldi, .equ and wait", {"ldi", ".equ", "wait"} <= labels, sorted(labels)[:20])
 
-    luri = "file://" + lib
-    c.notify("textDocument/didOpen", {
-        "textDocument": {"uri": luri, "languageId": "avr", "version": 1, "text": open(lib).read()}
-    })
+    # Open the include file too: it is shown as part of main.asm's program, so `counter` is known.
+    luri = pathlib.Path(lib).as_uri()
+    c.notify("textDocument/didOpen", {"textDocument": {"uri": luri, "languageId": "avr", "version": 1,
+                                                        "text": open(lib).read()}})
     check("lib.inc, opened, is checked as part of main.asm", c.diagnostics(luri) == [], c.diagnostics(luri))
     c.notify("textDocument/didChange", {
         "textDocument": {"uri": luri, "version": 2}, 

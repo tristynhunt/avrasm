@@ -1,6 +1,11 @@
 // the language server. JSON-RPC on stdin and stdout, each message after a
 // "Content-Length: N" header and an empty line as LSP frames them. everything
 // else is in lsp.c. messages for a person go to stderr which editors show in the logs.
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#endif
+
 #include "avrasm/lsp.h"
 
 #include <stdio.h>
@@ -44,6 +49,12 @@ static long readHeader(void)
 
 int main(void)
 {
+#ifdef _WIN32
+  // Content-Length counts bytes. in text mode windows would turn "\r\n" into "\n" on the way in
+  // and "\n" into "\r\n" on the way out and the counts would be wrong.
+  _setmode(_fileno(stdin), _O_BINARY);
+  _setmode(_fileno(stdout), _O_BINARY);
+#endif
   LspServer *s = lspCreate(avrDiskVfs(), sendMessage, NULL);
   while (lspExitCode(s) < 0) {
     long len = readHeader();

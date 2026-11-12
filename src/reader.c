@@ -541,6 +541,12 @@ static const char *joinPath(Reader *r, const char *dir, size_t dirLen, int needS
   return p;
 }
 
+static int isAbsolute(const char *path)
+{
+  char c = (char)(path[0] | 0x20);
+  return path[0] == '/' || (c >= 'a' && c <= 'z' && path[1] == ':' && path[2] == '/');
+}
+
 static void pushFile(Reader *r, FileId id)
 {
   Frame *f = arenaAlloc(&r->ctx->arena, sizeof *f, _Alignof(Frame));
@@ -602,15 +608,18 @@ static void doInclude(Reader *r, const Frame *f, const TokenLine *line, uint32_t
   clean[nameLen] = '\0';
 
   FileId id = FILE_NONE;
-  if (!angle) id = ctxLoadQuiet(r->ctx, joinPath(r, r->baseDir, strlen(r->baseDir), 0, clean));
-  for (uint32_t i = 0; id == FILE_NONE && i < r->dirCount; i++) {
+  int absolute = isAbsolute(clean);
+  if (absolute) id = ctxLoadQuiet(r->ctx, clean);
+  if (!angle && !absolute) id = ctxLoadQuiet(r->ctx, joinPath(r, r->baseDir, strlen(r->baseDir), 0, clean));
+  for (uint32_t i = 0; id == FILE_NONE && !absolute && i < r->dirCount; i++) {
     size_t dl = strlen(r->dirs[i]);
     int slash = dl != 0 && r->dirs[i][dl - 1] != '/' && r->dirs[i][dl - 1] != '\\';
     id = ctxLoadQuiet(r->ctx, joinPath(r, r->dirs[i], dl, slash, clean));
   }
   if (id == FILE_NONE) {
     diagEmit(&r->ctx->diags, DIAG_ERROR, at, "cannot find the include file '%s' (looked %s)", clean,
-      angle ? "in the -I directories" : "next to the main file, then in the -I directories");
+      absolute ? "only there: the path is absolute"
+      : angle ? "in the -I directories" : "next to the main file, then in the -I directories");
     if (f->up != NULL) {
       diagEmit(&r->ctx->diags, DIAG_INFO, at, 
         "a path is relative to the main file, not to the file that includes");

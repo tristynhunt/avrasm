@@ -12,6 +12,8 @@ static const struct {
   { "/p/lib.inc", "wait:\n  dec counter\n  brne wait\n  ret\n" },
   { "/p/bad.inc", "nop\nnosuch r1\n" },
   { "/p/inc/consts.inc", ".equ LIMIT = 100\n" },
+  { "c:/Users/z/lib.inc", "wait:\n  ret\n" },
+  { "C:/Users/z/bad.inc", "nosuch\n" },
 };
 
 static char *readDisk(void *user, const char *path, size_t *len)
@@ -290,6 +292,19 @@ static void testSettings(void)
   stop(s);
 }
 
+static void testWindowsPaths(void)
+{
+  const char *uri = "file:///c%3A/Users/z/main.asm";
+  LspServer *s = start("{\"rootUri\":\"file:///c%3A/Users/z\"}");
+  sendText(s, "textDocument/didOpen", uri, ".include \"lib.inc\"\n.include \"C:\\Users\\z\\bad.inc\"\nrcall wait\n");
+  CHECK_INT(count(published(uri)), 0);
+  const Json *d = published("file:///c%3A/Users/z/bad.inc");
+  CHECK_INT(count(d), 1);
+  request(s, 1, "textDocument/definition", uri, 2, 8);
+  CHECK_STR(jsonString(jsonGet(jsonGet(response(1), "result"), "uri")), "file:///c%3A/Users/z/lib.inc");
+  stop(s);
+}
+
 int main(void)
 {
   arenaInit(&arena, 0);
@@ -298,6 +313,7 @@ int main(void)
   testIncludes();
   testRequests();
   testSettings();
+  testWindowsPaths();
   arenaFree(&arena);
   return TEST_RESULT();
 }
