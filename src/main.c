@@ -148,7 +148,7 @@ int main(int argc, char **argv)
   Span nowhere = { FILE_NONE, 0, 0 };
   FileId file = ctxLoad(&ctx, path, nowhere);
   if (file != FILE_NONE) {
-    AsmOptions opt = { dirs, dirCount, defines, defineCount };
+    AsmOptions opt = { dirs, dirCount, defines, defineCount, NULL };
     result = assembleOpt(&ctx, file, &flash, &eeprom, &opt);
   }
   reportDiags(stderr, &ctx.sources, &ctx.diags);

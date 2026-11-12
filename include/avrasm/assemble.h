@@ -5,6 +5,7 @@
 
 #include "avrasm/ctx.h"
 #include "avrasm/image.h"
+#include "avrasm/outline.h"
 #include "avrasm/source.h"
 
 typedef struct AsmOptions
@@ -13,6 +14,7 @@ typedef struct AsmOptions
   uint32_t includeDirCount;
   const char *const *defines;       // -D: "NAME" or "NAME=text"
   uint32_t defineCount;
+  Outline *outline;     // when not NULL gets the names and the code of the program
 } AsmOptions;
 
 // assemble the already loaded source file 'file' into 'image'.

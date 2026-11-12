@@ -56,6 +56,12 @@ typedef struct InstrDesc
 // the instruction called name[0..len) in any case. NULL if no mnemonic exists.
 const InstrDesc *instrFind(const char *name, size_t len);
 
+// the i-th instruction of the table (alphabetical). NULL when i is past the end.
+const InstrDesc *instrAt(size_t i);
+
+// how its operands are written for hover: "Rd, K" for ldi, "" when it has none.
+const char *instrSyntax(const InstrDesc *d);
+
 // parses the operands following a mnemonic. ensures that it has exactly d->operandCount
 // operands. returns 1 and fills out, or 0 after one error.
 int instrParseOperands(const InstrDesc *d, const TokenLine *line, uint32_t from, Arena *arena,

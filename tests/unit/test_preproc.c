@@ -309,7 +309,7 @@ static int assembleRow(const Row *row, char **text)
   imageInit(&eeprom, &ctx.arena, ASSEMBLE_DEFAULT_EEPROM_SIZE);
   const char *dirs[] = {"third-party/includes", row->incDir};
   const char *defs[] = {row->define};
-  AsmOptions opt = {dirs, row->incDir != NULL ? 2u : 1u, defs, row->define != NULL ? 1u : 0u};
+  AsmOptions opt = {dirs, row->incDir != NULL ? 2u : 1u, defs, row->define != NULL ? 1u : 0u, NULL};
   int ok = assembleOpt(&ctx, id, &flash, &eeprom, &opt);
   const char *t = imageToText(&flash, &ctx.arena);
   *text = malloc(strlen(t) + 1);

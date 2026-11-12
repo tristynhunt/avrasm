@@ -164,6 +164,26 @@ const InstrDesc *instrFind(const char *name, size_t len)
   return NULL;
 }
 
+const InstrDesc *instrAt(size_t i)
+{
+  return i < TABLE_COUNT ? &table[i] : NULL;
+}
+
+const char *instrSyntax(const InstrDesc *d)
+{
+  static const char *const syntax[] = {
+    [FORM_NONE] = "",          [FORM_RD_RR] = "Rd, Rr",     [FORM_RD] = "Rd",           [FORM_RD_SAME] = "Rd",
+    [FORM_RD16] = "Rd",        [FORM_RD_K] = "Rd, K",       [FORM_RD_NK] = "Rd, K",     [FORM_RDW_K] = "Rd, K",
+    [FORM_MOVW] = "Rd, Rr",    [FORM_MULS] = "Rd, Rr",      [FORM_MUL8] = "Rd, Rr",     [FORM_RD_A] = "Rd, A",
+    [FORM_A_RR] = "A, Rr",     [FORM_A_B] = "A, b",         [FORM_R_B] = "Rr, b",       [FORM_S] = "s",
+    [FORM_BR_S] = "s, k",      [FORM_BR] = "k",             [FORM_REL12] = "k",         [FORM_ABS22] = "k",
+    [FORM_LDS] = "Rd, k",      [FORM_STS] = "k, Rr",        [FORM_LD] = "Rd, X|Y|Z (with + or -)",
+    [FORM_ST] = "X|Y|Z (with + or -), Rr",                  [FORM_LDD] = "Rd, Y+q|Z+q", [FORM_STD] = "Y+q|Z+q, Rr",
+    [FORM_LPM] = "[Rd, Z or Z+]",                           [FORM_SPM] = "[Z+]",
+  };
+  return syntax[d->form];
+}
+
 int instrParseOperands(const InstrDesc *d, const TokenLine *line, uint32_t from, Arena *arena,
   DiagList *diags, Operand out[INSTR_MAX_OPERANDS])
 {

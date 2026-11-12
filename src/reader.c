@@ -802,6 +802,16 @@ int readerHasMacro(const Reader *r, const char *name, size_t len)
   return findMacro(r, name, len) != NULL;
 }
 
+void readerOutline(const Reader *r, Outline *o)
+{
+  for (const Macro *m = r->macros; m != NULL; m = m->next) {
+    outlineAddName(o, OUTLINE_MACRO, m->name, m->len, m->argc, 0, m->defined);
+  }
+  for (const Define *d = r->defines; d != NULL; d = d->next) {
+    outlineAddName(o, OUTLINE_DEFINE, d->name, d->len, 0, 0, d->defined);
+  }
+}
+
 static void beginMacro(Reader *r, Frame *f, const TokenLine *line, uint32_t hi)
 {
   const Token *name = &line->tokens[hi + 1 < line->count ? hi + 1 : line->count - 1];

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "avrasm/ctx.h"
+#include "avrasm/outline.h"
 #include "avrasm/tokline.h"
 
 // the reader sits between the files and the assembler. the assembler asks it for the next line
@@ -60,5 +61,8 @@ int readerNext(Reader *r, ReaderLine *out);
 
 // checks if 'name' is the name of a macro
 int readerHasMacro(const Reader *r, const char *name, size_t len);
+
+// adds every macro and every #define name the reader knows now to the outline.
+void readerOutline(const Reader *r, Outline *o);
 
 #endif

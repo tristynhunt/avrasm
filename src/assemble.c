@@ -938,6 +938,66 @@ static void noteCallSite(Asm *a, Span callSite, uint32_t before)
     diagEmit(&a->ctx->diags, DIAG_INFO, callSite, "this line comes from the macro called here");
   }
 }
+
+static int sameSpan(Span a, Span b)
+{
+  return a.file == b.file && a.start == b.start;
+}
+
+// a label, .equ or .set name with the value it ended with. if this statement is where the symbol
+// table has it from a second definition (an error) is not added. every .set of a name defines it,
+// so for .set the outline keeps the first
+static void addSymbol(Asm *a, Outline *o, const Token *name, OutlineKind kind, char seg)
+{
+  size_t len;
+  const char *text = tokenText(a, name, &len);
+  const Symbol *sym = symtabFind(&a->syms, text, len);
+  if (sym == NULL) return;
+  SymKind want = kind == OUTLINE_LABEL ? SYM_LABEL : kind == OUTLINE_EQU ? SYM_EQU : SYM_SET;
+  if (sym->kind != want || (kind != OUTLINE_SET && !sameSpan(sym->defined, name->span))) return;
+  outlineAddName(o, kind, text, len, sym->value, seg, name->span);
+}
+
+// fills the outline from the statements after pass 2 and from the reader (macros and #define names).
+static void fillOutline(Asm *a, Outline *o)
+{
+  static const char segLetter[SEG_COUNT] = { 'c', 'd', 'e' };
+  for (const Stmt *s = a->first; s != NULL; s = s->next) {
+    if (s->hasLabel && s->scope == 0) addSymbol(a, o, &s->label, OUTLINE_LABEL, segLetter[s->seg]);
+    if (s->bad) continue;
+    size_t len;
+    const char *text;
+    OutlineCode code = { s->head.span, s->pc, 0, 0, s->callSite, s->scope };
+    switch (s->kind) {
+      case STMT_EQU:
+        addSymbol(a, o, &s->name, OUTLINE_EQU, 0);
+        break;
+      case STMT_SET:
+        addSymbol(a, o, &s->name, OUTLINE_SET, 0);
+        break;
+      case STMT_DEF:
+        text = tokenText(a, &s->name, &len);
+        outlineAddName(o, OUTLINE_DEF, text, len, s->regNum, 0, s->name.span);
+        break;
+      case STMT_INSTR:
+        code.words = s->instr->words;
+        if (s->seg == SEG_CODE) outlineAddCode(o, &code);
+        break;
+      case STMT_DB:
+      case STMT_DW:
+      case STMT_DD:
+      case STMT_DQ:
+        code.words = (s->dataBytes + 1) / 2;
+        code.isData = 1;
+        if (s->seg == SEG_CODE && code.words > 0) outlineAddCode(o, &code);
+        break;
+      default:
+        break;
+    }
+  }
+  readerOutline(a->reader, o);
+}
+
 int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const AsmOptions *opt)
 {
   Asm a;
@@ -972,6 +1032,7 @@ int assembleOpt(AvrCtx *ctx, FileId file, Image *flash, Image *eeprom, const Asm
   }
 
   pass2(&a);
+  if (opt != NULL && opt->outline != NULL) fillOutline(&a, opt->outline);
   if (diagListHasErrors(&ctx->diags)) return 0;
   if (flash->blockCount == 0 && eeprom->blockCount == 0 && a.dataReserved == 0) return ASSEMBLE_EMPTY;
   return 1;
